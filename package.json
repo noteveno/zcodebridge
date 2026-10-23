@@ -1,0 +1,18 @@
+{
+  "name": "planbridge",
+  "version": "1.2.0",
+  "description": "Use your ZCode / Z.ai plan through OpenAI-, Anthropic- and Responses-compatible APIs - works with Claude Code, Codex, OpenCode and any SDK. Zero dependencies.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --max-old-space-size=256 server.js",
+    "setup": "node setup.js",
+    "backup": "node backup.js",
+    "watch": "node models.js watch",
+    "accounts": "node accounts.js",
+    "test": "node tests/test_regression.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

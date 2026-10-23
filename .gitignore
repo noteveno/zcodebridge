@@ -1,0 +1,13 @@
+# secrets & private state - never commit
+accounts/
+config.json
+planbridge-backup.zip
+.memory/
+
+# runtime state
+server.log
+models.json
+
+# not part of the project
+archive/
+node_modules/

@@ -1,0 +1,12 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "apiKey": "",
+  "baseUrl": "https://zcode.z.ai/api/v1/zcode-plan/anthropic",
+  "defaultModel": "GLM-5.3",
+  "flashModel": "GLM-5.3-Flash",
+  "maxTokens": 128000,
+  "requestTimeoutMs": 300000,
+  "retries": 2,
+  "logLevel": "info"
+}

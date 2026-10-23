@@ -1,0 +1,5 @@
+# Keep everything LF so behavior is identical on every OS.
+* text=auto eol=lf
+
+# The gateway is sensitive to the exact prompt bytes - never convert.
+prompts/* -text
