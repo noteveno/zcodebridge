@@ -162,14 +162,15 @@ async function cmdLogin(name) {
   console.log(name
     ? `Z.ai login for account "${name}"`
     : 'Z.ai login (the account will be named after the signed-in email automatically)');
-  console.log('\n1. Open this link in your browser and sign in with the account you want to add:');
+  console.log('\n1. Open this link in your browser and sign in (or sign up) with the account');
+  console.log('   you want to add:');
   console.log('\n   ' + authorizeUrl + '\n');
-  console.log('2. After you sign in, the page shows "login complete" and a button that');
-  console.log('   links to zcode://oauth/callback?code=...');
-  console.log('   DO NOT click that button (it would open the ZCode desktop app).');
-  console.log('   Instead: right-click the button -> "Copy link address"');
-  console.log('   (or copy the zcode://... URL from the browser address bar).');
-  console.log('\n3. Paste that link here and press Enter.');
+  console.log('2. After signing in, the page may ask to open the ZCode app or show a');
+  console.log('   "login complete" screen. In every case: copy the link from the browser');
+  console.log('   ADDRESS BAR (it contains code=...). If there is a button linking to');
+  console.log('   zcode://oauth/callback, right-click it -> "Copy link address" works too.');
+  console.log('   Do not click that button - it would open the ZCode desktop app.');
+  console.log('\n3. Paste the copied link here and press Enter.');
   console.log('   (This also works from a browser on another device/network.)');
   console.log('\nWaiting for the callback link... (timeout 10 minutes, Ctrl+C to cancel)');
 
