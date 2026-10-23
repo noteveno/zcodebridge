@@ -35,7 +35,12 @@ node accounts.js usage            # live tokens used/left + expiry per account
 node accounts.js remove <name>
 ```
 
-`login` prints a link you open in any browser yourself (nothing auto-opens). After you sign in, the browser lands on `http://127.0.0.1:8917/callback` and the CLI detects it automatically — or you paste the final URL into the terminal when prompted. The account is saved, any free plan is claimed for you automatically, and the proxy picks it up on the next request.
+`login` prints a link you open in any browser yourself (nothing auto-opens — the browser can be on any device or network). After you sign in, the page shows a "login complete" screen with a button linking to `zcode://oauth/callback?code=...`:
+
+1. **Don't click the button** (it would open the ZCode desktop app) — instead **right-click it → "Copy link address"** (or copy the `zcode://...` URL from the address bar).
+2. Paste that link into the terminal.
+
+The CLI exchanges the code, saves the account (named after your email when no name is given), claims any free plan automatically, and the proxy picks it up on the next request.
 
 With several accounts:
 
