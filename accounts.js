@@ -49,9 +49,11 @@ const OAUTH = {
 
 function usage() {
   console.log(`usage:
-  node accounts.js login <name>
-      Z.ai OAuth login for a new account (link is printed, browser is NOT
-      auto-opened; the callback is captured automatically or paste the URL).
+  node accounts.js login [name]
+      Z.ai OAuth login for a new account. The name is optional - when
+      omitted, the account is named after the signed-in email (part
+      before @). The link is printed, the browser is NOT auto-opened; the
+      callback is captured automatically or paste the URL.
   node accounts.js add <name> [credentials.json [telemetry-state.json]]
       Capture the login currently active in the ZCode desktop app.
   node accounts.js usage
@@ -109,11 +111,34 @@ function waitForOAuthCallback(port, timeoutMs) {
           res.writeHead(404).end();
           return;
         }
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        res.end('<h2>Login captured &#10003;</h2><p>You can close this tab and go back to the terminal.</p>');
         const code = url.searchParams.get('code') || url.searchParams.get('authCode');
+        const state = url.searchParams.get('state');
+        const error = url.searchParams.get('error') || url.searchParams.get('error_description');
+        if (error) {
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          res.end(`<h2>Login failed</h2><p style="font-family:monospace">${String(error).slice(0, 300)}</p><p>Close this tab and try again.</p>`);
+          finish(new Error(`Login rejected: ${error}`));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
         if (code) {
-          finish(null, { code, state: url.searchParams.get('state') });
+          res.end('<h2>Login captured &#10003;</h2><p>You can close this tab and go back to the terminal.</p>');
+          console.log('\nLogin captured, finishing up...');
+          finish(null, { code, state });
+        } else {
+          // Some providers put the code in the URL fragment (#code=...),
+          // which a server never sees - the page below moves it into the
+          // query string and reloads so the CLI receives it.
+          res.end([
+            '<h2>Finishing login...</h2>',
+            '<script>',
+            'var q = new URLSearchParams(location.search);',
+            'var h = new URLSearchParams(location.hash.slice(1));',
+            'h.forEach(function (v, k) { if (!q.has(k)) q.set(k, v); });',
+            'if (q.get("code") || q.get("authCode")) location.replace(location.pathname + "?" + q.toString());',
+            'else document.body.innerHTML = "<h2>Waiting for login...</h2><p>No authorization code reached this page.</p><p>Copy the full URL from the address bar and paste it into the terminal.</p>";',
+            '</script>',
+          ].join('\n'));
         }
       } catch (error) {
         finish(error);
@@ -124,15 +149,16 @@ function waitForOAuthCallback(port, timeoutMs) {
     server.listen(port, '127.0.0.1', () => {
       rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const ask = () => {
-        rl.question('', (line) => {
+        rl.question('\nIf nothing happens automatically, paste the full URL from the browser address bar here and press Enter:\n> ', (line) => {
           const text = (line || '').trim();
-          const codeMatch = /[?&](?:code|authCode)=([^&\s"']+)/.exec(text);
+          const codeMatch = /[?&#](?:code|authCode)=([^&\s"']+)/.exec(text);
           if (codeMatch) {
-            const stateMatch = /[?&]state=([^&\s"']+)/.exec(text);
+            const stateMatch = /[?&#]state=([^&\s"']+)/.exec(text);
+            console.log('Code received from pasted URL.');
             finish(null, { code: decodeURIComponent(codeMatch[1]), state: stateMatch ? decodeURIComponent(stateMatch[1]) : null });
             return;
           }
-          console.log('(no code= in that input, waiting...)');
+          console.log('(no code= in that input, still waiting for the browser...)');
           ask();
         });
       };
@@ -141,14 +167,24 @@ function waitForOAuthCallback(port, timeoutMs) {
   });
 }
 
+function deriveAccountName(email, uuid) {
+  const base = String(email || '').split('@')[0].toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  let candidate = base || String(uuid || '').slice(0, 8) || 'account';
+  let suffix = 2;
+  while (fs.existsSync(path.join(accountsRoot(), candidate, 'credentials.json'))) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 async function cmdLogin(name) {
-  if (!name || !/^[A-Za-z0-9._-]+$/.test(name)) {
-    console.error('Usage: node accounts.js login <name>   (letters, digits, . _ -)');
+  if (name && !/^[A-Za-z0-9._-]+$/.test(name)) {
+    console.error('Usage: node accounts.js login [name]   (letters, digits, . _ -; or omit to name it after the account email)');
     process.exitCode = 1;
     return;
   }
-  const destDir = path.join(accountsRoot(), name);
-  if (fs.existsSync(path.join(destDir, 'credentials.json')) && !process.argv.includes('--force')) {
+  if (name && fs.existsSync(path.join(accountsRoot(), name, 'credentials.json')) && !process.argv.includes('--force')) {
     console.error(`Account "${name}" already exists. Re-login with --force to overwrite.`);
     process.exitCode = 1;
     return;
@@ -164,7 +200,9 @@ async function cmdLogin(name) {
     state,
   }).toString();
 
-  console.log('Z.ai login for account "' + name + '"');
+  console.log(name
+    ? `Z.ai login for account "${name}"`
+    : 'Z.ai login (the account will be named after the signed-in email automatically)');
   console.log('\n1. Open this link in your browser and sign in with the account you want to add:');
   console.log('\n   ' + authorizeUrl + '\n');
   console.log('2. After you approve, the browser is redirected to http://127.0.0.1:' + port + '/callback');
@@ -238,6 +276,12 @@ async function cmdLogin(name) {
     email: userInfo?.email || '',
     name: userInfo?.name || userInfo?.preferred_username || userInfo?.username || userInfo?.email || '',
   };
+
+  if (!name) {
+    name = deriveAccountName(normalizedUser.email, normalizedUser.user_id);
+    console.log(`\nAccount name: ${name}`);
+  }
+  const destDir = path.join(accountsRoot(), name);
 
   const deviceMid = crypto.randomUUID();
   fs.mkdirSync(destDir, { recursive: true });

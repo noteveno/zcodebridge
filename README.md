@@ -27,14 +27,15 @@ The wizard asks which tools to set up (one, several, or all), **backs up every c
 ## Adding accounts
 
 ```bash
-node accounts.js login <name>    # log in with another Z.ai account (in the terminal)
-node accounts.js add <name>      # or capture the login from the ZCode desktop app
-node accounts.js list            # all accounts
-node accounts.js usage           # live tokens used/left + expiry per account
+node accounts.js login            # name is derived from the account email automatically
+node accounts.js login work       # ...or give it an explicit name
+node accounts.js add <name>       # or capture the login from the ZCode desktop app
+node accounts.js list             # all accounts
+node accounts.js usage            # live tokens used/left + expiry per account
 node accounts.js remove <name>
 ```
 
-`login` prints a link you open in any browser yourself (nothing auto-opens). After you sign in, the callback is detected automatically — or you paste the final URL back into the terminal. The account is saved, any free plan is claimed for you automatically, and the proxy picks it up on the next request.
+`login` prints a link you open in any browser yourself (nothing auto-opens). After you sign in, the browser lands on `http://127.0.0.1:8917/callback` and the CLI detects it automatically — or you paste the final URL into the terminal when prompted. The account is saved, any free plan is claimed for you automatically, and the proxy picks it up on the next request.
 
 With several accounts:
 
