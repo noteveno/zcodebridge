@@ -8,7 +8,7 @@ const { HttpError, makeSessionId, readResponseText } = require('./util');
 const { accountNames, loadAccountCredentials } = require('./credentials');
 const { upstreamUrl, upstreamRequestWithRetry, clampMaxTokens } = require('./upstream');
 const { fetchAccountUsage, cachedAccountUsage, capabilityModels } = require('./billing');
-const { modelList, mapModel, mergeDiscoveredModels } = require('./models');
+const { modelList, mapModel, mergeDiscoveredModels, knownModels } = require('./models');
 const { openAIToAnthropic, anthropicToOpenAIResponse, streamAnthropicToOpenAI } = require('./openai');
 const { rewriteAnthropicJson, streamAnthropicPassthrough } = require('./anthropic');
 const { responsesToAnthropic, anthropicToResponses, streamAnthropicToResponses } = require('./responses');
@@ -112,7 +112,13 @@ async function handleModels(req, res) {
   }
   const fresh = mergeDiscoveredModels(granted);
   if (fresh.length) log('info', `discovered new models from plan: ${fresh.join(', ')}`);
-  sendJson(res, 200, { object: 'list', data: modelList(granted) });
+  // Plan capabilities use lowercase ids; map them onto the configured
+  // canonical names instead of listing duplicates.
+  const known = knownModels();
+  const canonical = new Set(
+    granted.map((id) => known.find((m) => m.toLowerCase() === id.toLowerCase()) || id),
+  );
+  sendJson(res, 200, { object: 'list', data: modelList([...canonical]) });
 }
 
 async function handleUsage(req, res) {
@@ -259,22 +265,24 @@ async function handleAnthropicMessages(req, res) {
     anthropicBody.metadata = rest;
   }
 
-  const upstream = await upstreamRequestWithRetry(anthropicBody, {
-    sessionId: clientSessionId(req),
-    account: requestAccount(req),
-  });
+  const upstreamOptions = { sessionId: clientSessionId(req), account: requestAccount(req) };
 
   if (body.stream === true) {
+    const upstream = await upstreamRequestWithRetry(anthropicBody, upstreamOptions);
     await streamAnthropicPassthrough(upstream.response, res, requestedModel);
     return;
   }
 
-  const text = await readResponseText(upstream.response);
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new HttpError(502, 'ZCode upstream returned invalid JSON', 'upstream_invalid_json', 'api_error');
+  const hasUsefulContent = (json) => (Array.isArray(json.content) ? json.content : [])
+    .some((block) => block && (block.type === 'text' || block.type === 'tool_use'));
+
+  let { json } = await requestUpstreamJson(anthropicBody, req);
+  if (!hasUsefulContent(json)) {
+    const retryBody = {
+      ...anthropicBody,
+      output_config: { ...(anthropicBody.output_config || {}), effort: 'low' },
+    };
+    ({ json } = await requestUpstreamJson(retryBody, req));
   }
   sendJson(res, 200, rewriteAnthropicJson(json, requestedModel));
 }
