@@ -99,6 +99,18 @@ function requestAccount(req) {
   return undefined;
 }
 
+// anthropic-* headers from the client that must reach the gateway
+// unchanged (e.g. anthropic-beta for Claude Code auto mode classifiers).
+function clientAnthropicHeaders(req) {
+  const forwarded = {};
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (/^anthropic-/i.test(name) && typeof value === 'string') {
+      forwarded[name] = value;
+    }
+  }
+  return forwarded;
+}
+
 // ---------------------------------------------------------------------------
 // Route handlers
 // ---------------------------------------------------------------------------
@@ -265,7 +277,11 @@ async function handleAnthropicMessages(req, res) {
     anthropicBody.metadata = rest;
   }
 
-  const upstreamOptions = { sessionId: clientSessionId(req), account: requestAccount(req) };
+  const upstreamOptions = {
+    sessionId: clientSessionId(req),
+    account: requestAccount(req),
+    clientHeaders: clientAnthropicHeaders(req),
+  };
 
   if (body.stream === true) {
     const upstream = await upstreamRequestWithRetry(anthropicBody, upstreamOptions);
@@ -386,6 +402,13 @@ const server = http.createServer(async (req, res) => {
     const code = error instanceof HttpError ? error.code : 'internal_error';
     const isAnthropic = pathname.includes('/messages');
     log('error', `${req.method} ${pathname} -> ${status} ${code}: ${message}`);
+    // Upstream error bodies are forwarded verbatim on the Anthropic wire -
+    // clients match on the upstream error wording for their retry logic.
+    if (isAnthropic && error.upstreamBody) {
+      res.writeHead(error.upstreamStatus || status, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(error.upstreamBody);
+      return;
+    }
     if (isAnthropic) {
       sendAnthropicError(res, status, message, status === 401 ? 'authentication_error' : 'api_error');
     } else {

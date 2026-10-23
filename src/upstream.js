@@ -20,11 +20,11 @@ function upstreamUrl() {
   return `${base}/v1/messages`;
 }
 
-function buildUpstreamHeaders(credentials, sessionId) {
+function buildUpstreamHeaders(credentials, sessionId, clientAnthropicHeaders) {
   const { xPlatform, osCategory, osVersion } = platformHeaders();
-  return {
+  const headers = {
     'content-type': 'application/json',
-    'anthropic-version': '2023-06-01',
+    'anthropic-version': reqHeader(clientAnthropicHeaders, 'anthropic-version') || '2023-06-01',
     'http-referer': 'https://zcode.z.ai',
     'user-agent': `ZCode/${APP_VERSION}`,
     'x-zcode-app-version': APP_VERSION,
@@ -45,6 +45,23 @@ function buildUpstreamHeaders(credentials, sessionId) {
     'x-device-mid': credentials.deviceMid,
     authorization: `Bearer ${credentials.jwt}`,
   };
+  // Claude Code auto mode and other betas send anthropic-* headers (e.g.
+  // anthropic-beta) that must reach the gateway together with their body
+  // fields, so forward them unchanged.
+  if (clientAnthropicHeaders && typeof clientAnthropicHeaders === 'object') {
+    for (const [name, value] of Object.entries(clientAnthropicHeaders)) {
+      if (/^anthropic-/i.test(name) && typeof value === 'string') {
+        headers[name.toLowerCase()] = value;
+      }
+    }
+  }
+  return headers;
+}
+
+function reqHeader(headers, name) {
+  if (!headers) return undefined;
+  const value = headers[name] ?? headers[name.toLowerCase()];
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function buildMetadata(credentials, sessionId, clientMetadata) {
@@ -80,8 +97,14 @@ async function upstreamRequest(body, options = {}) {
   };
 
   const url = upstreamUrl();
-  const headers = buildUpstreamHeaders(credentials, sessionId);
+  const headers = buildUpstreamHeaders(credentials, sessionId, options.clientHeaders);
   const started = Date.now();
+
+  // Timeout guards connection + time-to-headers only: an agent session can
+  // legitimately stream for much longer than the timeout, and aborting the
+  // fetch mid-body would kill the stream ("server error mid-response").
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs, undefined);
 
   let response;
   try {
@@ -89,9 +112,11 @@ async function upstreamRequest(body, options = {}) {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.requestTimeoutMs),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
   } catch (error) {
+    clearTimeout(timeout);
     log('warn', `upstream network error: ${error.message}`);
     throw new HttpError(502, `ZCode upstream request failed: ${error.message}`, 'upstream_network_error', 'api_error');
   }

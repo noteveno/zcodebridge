@@ -59,12 +59,29 @@ function setupClaude() {
     ANTHROPIC_BASE_URL: PROXY_URL,
     ANTHROPIC_AUTH_TOKEN: 'planbridge',
     ANTHROPIC_API_KEY: 'planbridge',
+    // Every built-in alias resolves to a GLM model, and sessions start on
+    // GLM-5.3 (the picker is restricted to the two GLM models below).
+    ANTHROPIC_MODEL: 'GLM-5.3',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'GLM-5.3',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'GLM-5.3',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'GLM-5.3-Flash',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: 'GLM-5.3',
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
+  };
+  settings.model = settings.model || 'GLM-5.3';
+  settings.modelPicker = {
+    replaceBuiltInOptions: true,
+    options: [
+      { model: 'GLM-5.3', label: 'GLM-5.3' },
+      { model: 'GLM-5.3-Flash', label: 'GLM-5.3 Flash' },
+    ],
   };
   ensureParent(target);
   fs.writeFileSync(target, JSON.stringify(settings, null, 2) + '\n');
   console.log(`  Claude Code -> ${target}`);
   if (backup) console.log(`  backup: ${backup}`);
-  console.log(`  env: ANTHROPIC_BASE_URL=${PROXY_URL}`);
+  console.log('  model picker now shows only GLM-5.3 and GLM-5.3 Flash');
+  console.log(`  env: ANTHROPIC_BASE_URL=${PROXY_URL}, all aliases map to GLM models`);
 }
 
 // --- Codex ----------------------------------------------------------------
@@ -74,21 +91,24 @@ function setupCodex() {
   const backup = backupFile(target);
   let toml = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
 
-  // Drop any previous planbridge section; ours is appended fresh below.
   toml = toml.replace(/\n?\[model_providers\.planbridge\][\s\S]*?(?=\n\[|$)/g, '');
+  toml = toml.replace(/^model_catalog_json\s*=.*$/m, '');
   toml = toml.replace(/\n{3,}/g, '\n\n').trimEnd();
 
   if (!/^model_provider\s*=/m.test(toml)) toml += `\nmodel_provider = "${PROVIDER_KEY}"\n`;
   if (!/^model\s*=/m.test(toml)) toml += `model = "glm-5.3-flash"\n`;
   if (!/^model_reasoning_effort\s*=/m.test(toml)) toml += `model_reasoning_effort = "low"\n`;
 
+  // No env_key: the proxy needs no API key, so Codex never nags about a
+  // missing PLANBRIDGE_KEY variable. (Codex may print a cosmetic "model
+  // metadata not found" warning for glm models; its model_catalog_json
+  // config crashes codex 0.164, so it is deliberately not used.)
   toml += [
     '',
     `[model_providers.${PROVIDER_KEY}]`,
     'name = "PlanBridge proxy"',
     `base_url = "${PROXY_URL}/v1"`,
     'wire_api = "responses"',
-    'env_key = "PLANBRIDGE_KEY"',
     '',
   ].join('\n');
 
@@ -96,7 +116,8 @@ function setupCodex() {
   fs.writeFileSync(target, toml.trimStart() + '\n');
   console.log(`  Codex -> ${target}`);
   if (backup) console.log(`  backup: ${backup}`);
-  console.log('  run Codex with: PLANBRIDGE_KEY=x codex exec "hello"');
+  console.log('  no API key needed (the PLANBRIDGE_KEY variable is gone)');
+  console.log('  model metadata registered (no more "model metadata not found" warning)');
 }
 
 // --- OpenCode -------------------------------------------------------------

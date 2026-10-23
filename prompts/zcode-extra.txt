@@ -20,15 +20,6 @@ For actions that are hard to reverse or outward-facing, confirm first unless dur
 # Session-specific guidance
 - When the user types `/<skill-name>`, invoke it via Skill. Only use skills listed in the user-invocable skills section — don't guess.
 
-# Environment
-You have been invoked in the following environment:
-- Primary working directory: C:\Users\kaiden\.zcode\workspace\default
-- Is a git repository: no
-- Platform: win32
-- Shell: Git Bash
-- OS Version: win32 10.0.26100 x64
-- You are powered by the model named account:zai-start-plan/GLM-5.3.
-
 # Context management
 When the conversation grows long, some or all of the current context is summarized; the summary, along with any remaining unsummarized context, is provided in the next context window so work can continue — you don't need to wrap up early or hand off mid-task.
 

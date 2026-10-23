@@ -22,7 +22,7 @@ For actions that are hard to reverse or outward-facing, confirm first unless dur
 
 # Environment
 You have been invoked in the following environment:
-- Primary working directory: C:\Users\kaiden\.zcode\workspace\default
+- Primary working directory: C:\Users\user\.zcode\workspace\default
 - Is a git repository: no
 - Platform: win32
 - Shell: Git Bash
