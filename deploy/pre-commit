@@ -1,5 +1,5 @@
 #!/bin/sh
-# PlanBridge git pre-commit hook: refresh the admin backup zip before every
+# ZCodeBridge git pre-commit hook: refresh the admin backup zip before every
 # commit. Install once with:
 #   cp deploy/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 node backup.js >/dev/null 2>&1 || true

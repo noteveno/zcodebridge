@@ -2,7 +2,7 @@
 'use strict';
 
 /*
- * PlanBridge
+ * ZCodeBridge
  * -------------
  * OpenAI-compatible (/v1/chat/completions), Responses-compatible
  * (/v1/responses, used by Codex) and Anthropic-compatible (/v1/messages)

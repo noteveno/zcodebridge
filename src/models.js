@@ -51,6 +51,27 @@ function isFlashLike(value) {
   return /flash|mini|haiku|air|lite|turbo/i.test(value);
 }
 
+// Model names may carry an effort suffix (e.g. "glm-5.3-max") so tools
+// whose UI only offers a limited effort range can still reach xhigh/max.
+const EFFORT_SUFFIXES = ['ultracode', 'xhigh', 'max', 'high', 'medium', 'low', 'minimal'];
+
+function splitEffortSuffix(requested) {
+  const value = String(requested || '').trim();
+  const match = /^(.*)-(ultracode|xhigh|max|high|medium|low|minimal)$/i.exec(value);
+  if (!match || !match[1]) return { base: value, effort: null };
+  return { base: match[1], effort: match[2].toLowerCase() };
+}
+
+// Upstream supports low/high/max only; richer client scales collapse onto them.
+function normalizeEffort(effort) {
+  const map = {
+    minimal: 'low', low: 'low',
+    medium: 'high', high: 'high',
+    xhigh: 'max', ultra: 'max', ultracode: 'max', max: 'max',
+  };
+  return map[String(effort || '').toLowerCase()] || 'high';
+}
+
 function mapModel(requested) {
   const value = String(requested || '').trim();
   const lower = value.toLowerCase();
@@ -94,6 +115,9 @@ module.exports = {
   writeRegistry,
   mergeDiscoveredModels,
   isFlashLike,
+  splitEffortSuffix,
+  normalizeEffort,
+  EFFORT_SUFFIXES,
   CONTEXT_WINDOW,
   MAX_OUTPUT_TOKENS,
   MODELS_FILE,

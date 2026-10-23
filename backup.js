@@ -2,12 +2,12 @@
 'use strict';
 
 /*
- * PlanBridge backup
+ * ZCodeBridge backup
  * ------------------
  *   node backup.js      (or: npm run backup)
  *
  * Packs the entire project folder - INCLUDING SECRETS (accounts/, config
- * files) - into planbridge-backup.zip. The zip is meant for the admin only:
+ * files) - into zcodebridge-backup.zip. The zip is meant for the admin only:
  * it is listed in .gitignore and must never be committed. Re-run it (or let
  * the git pre-commit hook do it) after every change.
  *
@@ -19,7 +19,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 const ROOT = __dirname;
-const OUT = path.join(ROOT, 'planbridge-backup.zip');
+const OUT = path.join(ROOT, 'zcodebridge-backup.zip');
 
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'archive']);
 const SKIP_FILES = new Set([path.basename(OUT), 'server.log']);

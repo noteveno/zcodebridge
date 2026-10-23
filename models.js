@@ -2,7 +2,7 @@
 'use strict';
 
 /*
- * PlanBridge model watcher
+ * ZCodeBridge model watcher
  * -------------------------
  *   node models.js list     Show configured + discovered models
  *   node models.js check    Fetch plan entitlements once and detect new models

@@ -2,7 +2,7 @@
 accounts/
 backup/
 config.json
-planbridge-backup.zip
+zcodebridge-backup.zip
 .memory/
 
 # runtime state

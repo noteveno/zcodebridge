@@ -165,10 +165,9 @@ async function cmdLogin(name) {
   console.log('\n1. Open this link in your browser and sign in (or sign up) with the account');
   console.log('   you want to add:');
   console.log('\n   ' + authorizeUrl + '\n');
-  console.log('2. After signing in, the page may ask to open the ZCode app or show a');
-  console.log('   "login complete" screen. In every case: copy the link from the browser');
-  console.log('   ADDRESS BAR (it contains code=...). If there is a button linking to');
-  console.log('   zcode://oauth/callback, right-click it -> "Copy link address" works too.');
+  console.log('2. After signing in, the page may ask to open the ZCode app or show an');
+  console.log('   "Authorization Failed" screen. In every case: copy the link from the');
+  console.log('   browser ADDRESS BAR (it contains code=...).');
   console.log('   Do not click that button - it would open the ZCode desktop app.');
   console.log('\n3. Paste the copied link here and press Enter.');
   console.log('   (This also works from a browser on another device/network.)');
@@ -317,7 +316,25 @@ async function printAccountUsage(credentials) {
     for (const b of balances) {
       console.log(`  ${String(b.show_name || '?').padEnd(14)} used ${formatTokens(b.used_units)} / ${formatTokens(b.total_units)}  remaining ${formatTokens(b.remaining_units)}  resets ${b.period_end ? new Date(b.period_end * 1000).toISOString().slice(0, 19).replace('T', ' ') : '-'}`);
     }
-    if (!balances.length) console.log('  (no token buckets found)');
+    if (!balances.length) {
+      console.log('  (no token buckets found)');
+      return;
+    }
+    // One-time grants (the big e.g. 300M buckets) vs daily-reset buckets.
+    const dayMs = 24 * 3600 * 1000;
+    const oneTime = balances.filter((b) => !b.period_end || (b.period_end * 1000 - nowMs) > 3 * dayMs);
+    const daily = balances.filter((b) => b.period_end && (b.period_end * 1000 - nowMs) <= 3 * dayMs);
+    const oneTimeLeft = oneTime.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
+    const dailyLeft = daily.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
+    if (oneTime.length && oneTimeLeft <= 0) {
+      if (dailyLeft > 0) {
+        const nextReset = Math.min(...daily.filter((b) => (Number(b.remaining_units) || 0) > 0).map((b) => b.period_end * 1000));
+        console.log(`  >> The one-time plan tokens are finished - back to using daily tokens (${formatTokens(dailyLeft)} left, next refill ${new Date(nextReset).toISOString().slice(0, 19).replace('T', ' ')}).`);
+      } else {
+        const nextReset = daily.length ? Math.min(...daily.map((b) => b.period_end * 1000)) : null;
+        console.log(`  >> All tokens are used up. ${nextReset ? `Daily tokens refill at ${new Date(nextReset).toISOString().slice(0, 19).replace('T', ' ')} - ` : ''}or add another account: node accounts.js login`);
+      }
+    }
   } catch (error) {
     console.error('Usage check failed: ' + error.message);
   }

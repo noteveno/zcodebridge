@@ -2,20 +2,20 @@
 #
 # Install:
 #   mkdir -p ~/.config/systemd/user
-#   cp deploy/planbridge.service ~/.config/systemd/user/
+#   cp deploy/zcodebridge.service ~/.config/systemd/user/
 #   # edit WorkingDirectory to where you put the project, then:
 #   systemctl --user daemon-reload
-#   systemctl --user enable --now planbridge
+#   systemctl --user enable --now zcodebridge
 #
 # Logs:
-#   journalctl --user -u planbridge -f
+#   journalctl --user -u zcodebridge -f
 
 [Unit]
 Description=PlanBridge - ZCode plan to OpenAI/Anthropic/Responses APIs
 After=network-online.target
 
 [Service]
-WorkingDirectory=%h/planbridge
+WorkingDirectory=%h/zcodebridge
 ExecStart=/usr/bin/env node --max-old-space-size=256 server.js
 Restart=on-failure
 RestartSec=3

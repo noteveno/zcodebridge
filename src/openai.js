@@ -6,7 +6,7 @@
 const crypto = require('node:crypto');
 const { config } = require('./config');
 const { HttpError, firstDefined } = require('./util');
-const { mapModel } = require('./models');
+const { mapModel, splitEffortSuffix, normalizeEffort } = require('./models');
 const { clampMaxTokens } = require('./upstream');
 const { iterateSse, sseWrite } = require('./sse');
 
@@ -215,8 +215,9 @@ function openAIToAnthropic(body) {
 
   const tools = openAIToolsToAnthropic(body.tools);
   const maxTokens = firstDefined(body.max_tokens, body.max_completion_tokens, config.maxTokens);
+  const { base, effort: suffixEffort } = splitEffortSuffix(body.model);
   const anthropic = {
-    model: mapModel(body.model),
+    model: mapModel(base),
     max_tokens: clampMaxTokens(maxTokens),
     stream: body.stream === true,
     messages,
@@ -267,6 +268,9 @@ function openAIToAnthropic(body) {
       ...(anthropic.output_config || {}),
       effort: effortMap[body.reasoning_effort.toLowerCase()] || 'high',
     };
+  } else if (suffixEffort) {
+    // Effort picked via a model-name suffix (e.g. "glm-5.3-max").
+    anthropic.output_config = { ...(anthropic.output_config || {}), effort: normalizeEffort(suffixEffort) };
   }
 
   return anthropic;

@@ -8,7 +8,7 @@ const { HttpError, makeSessionId, readResponseText } = require('./util');
 const { accountNames, loadAccountCredentials } = require('./credentials');
 const { upstreamUrl, upstreamRequestWithRetry, clampMaxTokens } = require('./upstream');
 const { fetchAccountUsage, cachedAccountUsage, capabilityModels } = require('./billing');
-const { modelList, mapModel, mergeDiscoveredModels, knownModels } = require('./models');
+const { modelList, mapModel, mergeDiscoveredModels, knownModels, splitEffortSuffix, normalizeEffort } = require('./models');
 const { openAIToAnthropic, anthropicToOpenAIResponse, streamAnthropicToOpenAI } = require('./openai');
 const { rewriteAnthropicJson, streamAnthropicPassthrough } = require('./anthropic');
 const { responsesToAnthropic, anthropicToResponses, streamAnthropicToResponses } = require('./responses');
@@ -170,6 +170,20 @@ async function handleUsage(req, res) {
       entry.expired = entry.plan_expires_at
         ? entry.plan_expires_at * 1000 < nowMs
         : active.length === 0;
+      // Distinguish the big one-time grants from daily-reset buckets so the
+      // "plan finished, on daily tokens now" state is visible.
+      const dayMs = 24 * 3600 * 1000;
+      const oneTime = balances.filter((b) => !b.period_end || (b.period_end * 1000 - nowMs) > 3 * dayMs);
+      const daily = balances.filter((b) => b.period_end && (b.period_end * 1000 - nowMs) <= 3 * dayMs);
+      const oneTimeLeft = oneTime.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
+      const dailyLeft = daily.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
+      if (oneTime.length && oneTimeLeft <= 0 && dailyLeft > 0) {
+        entry.plan_status = `one-time plan tokens finished; using daily tokens (${dailyLeft} left)`;
+      } else if (oneTime.length && oneTimeLeft <= 0) {
+        entry.plan_status = 'all tokens used up; waiting for the daily reset or add another account';
+      } else {
+        entry.plan_status = 'active';
+      }
     } catch (error) {
       entry.error = error instanceof Error ? error.message : String(error);
     }
@@ -259,10 +273,17 @@ async function handleAnthropicMessages(req, res) {
   const requestedModel = body.model || config.defaultModel;
   const anthropicBody = {
     ...body,
-    model: mapModel(body.model),
+    model: mapModel(splitEffortSuffix(body.model).base),
     max_tokens: clampMaxTokens(body.max_tokens),
     stream: body.stream === true,
   };
+  const suffixEffort = splitEffortSuffix(body.model).effort;
+  if (suffixEffort && !anthropicBody.output_config?.effort) {
+    anthropicBody.output_config = {
+      ...(anthropicBody.output_config || {}),
+      effort: normalizeEffort(suffixEffort),
+    };
+  }
   delete anthropicBody.user;
   // The upstream model always thinks and rejects thinking.type "disabled"
   // (error 1210); translate it to the supported low effort instead.
@@ -361,7 +382,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && (pathname === '/' || pathname === '/health')) {
       sendJson(res, 200, {
         ok: true,
-        name: 'planbridge',
+        name: 'zcodebridge',
         version: VERSION,
         upstream: config.baseUrl,
         models: [config.defaultModel, config.flashModel],
@@ -440,7 +461,7 @@ function start() {
   })();
 
   server.listen(config.port, config.host, () => {
-    log('info', `planbridge ${VERSION} listening on http://${config.host}:${config.port}`);
+    log('info', `zcodebridge ${VERSION} listening on http://${config.host}:${config.port}`);
     log('info', `upstream: ${upstreamUrl()}`);
     log('info', `models: ${config.defaultModel}, ${config.flashModel}`);
     log('info', `accounts: ${accountNames().map((n) => n || '(default)').join(', ')}`);

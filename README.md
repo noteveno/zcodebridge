@@ -1,4 +1,4 @@
-# PlanBridge
+# ZCodeBridge
 
 Use your **ZCode / Z.ai plan** through the APIs every tool already speaks:
 
@@ -11,18 +11,26 @@ Works with **Claude Code**, **Codex**, **OpenCode**, and any OpenAI/Anthropic SD
 
 - **Zero dependencies** — pure Node.js 18+, nothing to install
 - **Multi-account** — round-robin rotation, per-request pinning, auto-rotation when a plan expires
-- **Per-model quota awareness** — each model has its own token bucket; the proxy routes around empty buckets and tells you which model still has quota
+- **Per-model quota awareness** — each model has its own token bucket; the proxy routes around empty buckets, falls back to daily tokens when the big plan runs dry, and tells you what to do when everything is used up
 - **Auto model discovery** — new models Z.ai ships later are detected and served automatically
 - **One-command setup** — an interactive wizard configures your coding tools for you
 
-## Quick start
+## Install
 
 ```bash
-node server.js          # start the proxy on http://127.0.0.1:8787
-node setup              # connect Claude Code / Codex / OpenCode (your choice)
+git clone https://github.com/noteveno/zcodebridge.git
+cd zcodebridge
+node server.js        # start the proxy on http://127.0.0.1:8787
+node setup            # connect Claude Code / Codex / OpenCode (your choice)
 ```
 
-The wizard asks which tools to set up (one, several, or all), **backs up every config before touching it**, and wires everything to the proxy. If you've signed into ZCode before, the proxy works with that account immediately.
+That's it — no `npm install`, no build step. If you've signed into ZCode before, the proxy works with that account immediately; otherwise add one right away:
+
+```bash
+node accounts.js login
+```
+
+(To run as a service on Linux, see `deploy/zcodebridge.service`.)
 
 ## Adding accounts
 
@@ -35,19 +43,24 @@ node accounts.js usage            # live tokens used/left + expiry per account
 node accounts.js remove <name>
 ```
 
-`login` prints a link you open in any browser yourself (nothing auto-opens — the browser can be on any device or network). After you sign in, the page shows a "login complete" screen with a button linking to `zcode://oauth/callback?code=...`:
+`login` prints a link you open in any browser yourself (nothing auto-opens — the browser can be on any device or network). After you sign in:
 
-1. **Don't click the button** (it would open the ZCode desktop app) — instead **right-click it → "Copy link address"** (or copy the `zcode://...` URL from the address bar).
-2. Paste that link into the terminal.
+1. The page may ask to open the ZCode app or show an **"Authorization Failed"** screen — that's fine.
+2. **Don't click any "open app" button** — instead copy the link from the browser **address bar** (it contains `code=...`).
+3. Paste it into the terminal.
 
-The CLI exchanges the code, saves the account (named after your email when no name is given), claims any free plan automatically, and the proxy picks it up on the next request.
+The CLI exchanges the code, saves the account (named after your email when no name is given), **claims any free plan automatically**, and prints your balance.
+
+### Rotation and quota
 
 With several accounts:
 
 - requests rotate across all of them to spread quota
 - `x-zcode-account: <name>` pins a request to one account
+- each model has its own bucket (e.g. 300M Flash tokens + 200M GLM-5.3 tokens); accounts with 0 left for the requested model are skipped
 - expired plans and rejected tokens auto-rotate to the next account
-- when a model's tokens are gone everywhere, you get a clear message: which other model still has quota, or to add a new account
+- when a model's tokens are gone everywhere you get a clear message: which other model still has quota, or to add a new account
+- **when the big one-time plan runs out**, the proxy automatically continues on the plan's daily-reset buckets (e.g. 5M Flash / 3M GLM-5.3 per day), and the usage output says so, including when the next daily refill lands
 
 ## Usage & limits
 
@@ -55,13 +68,14 @@ With several accounts:
 curl http://127.0.0.1:8787/v1/usage
 ```
 
-Shows per account: active plans, expiry dates, and per-model token buckets (total / used / remaining). Add `x-refresh-usage: 1` to bypass the 30-second cache.
+Shows per account: active plans, expiry, per-model buckets (total / used / remaining / reset time), and a `plan_status` field (`active`, or "one-time plan tokens finished; using daily tokens …"). Add `x-refresh-usage: 1` to bypass the 30-second cache. `node accounts.js usage` prints a friendly version.
 
 ## Models
 
 - `GLM-5.3` and `GLM-5.3-Flash` — 1M-token context window, 128K max output tokens
-- Common aliases map automatically (`gpt-4o`, `claude-sonnet` → GLM-5.3; `gpt-4o-mini`, `claude-haiku` → GLM-5.3-Flash; unknown names fall back to GLM-5.3)
-- **New models appear automatically**: plan entitlements list every model the account may use, and the proxy serves them the moment they show up (`GET /v1/models` reflects it). `node models.js watch` also runs as a standalone monitor that logs the moment a new model (a future GLM-5.4, say) is detected.
+- Common aliases map automatically (`gpt-4o`, `claude-sonnet` → GLM-5.3; `gpt-4o-mini`, `claude-haiku` → GLM-5.3-Flash)
+- **Effort variants**: any model name may carry an effort suffix — `glm-5.3-max`, `glm-5.3-xhigh`, `glm-5.3-flash-max`, … — for tools whose effort picker doesn't go up to max (e.g. OpenCode). The suffix sets the thinking effort and the name routes to the base model.
+- **New models appear automatically**: plan entitlements list every model the account may use, and the proxy serves them the moment they show up. `node models.js watch` also runs as a standalone monitor.
 
 ## Thinking & effort
 
@@ -75,7 +89,13 @@ Effort scales map cleanly: the upstream supports `low`, `high`, `max`; client sc
 
 ## JSON mode
 
-`response_format` (`json_schema` / `json_object`) is fully enforced by the proxy: schema-aware instruction, thinking pinned low so it can't eat the budget, and markdown fences stripped — your `content` is always parseable JSON, streamed or not.
+`response_format` (`json_schema` / `json_object`) and the Responses `text.format` are fully enforced by the proxy: schema-aware instruction, thinking pinned low so it can't eat the budget, and markdown fences stripped — your `content` is always parseable JSON, streamed or not.
+
+## Tool-specific notes
+
+- **Claude Code**: `node setup` restricts the model picker to GLM-5.3 / GLM-5.3 Flash and maps every built-in alias to them. Thinking works (`MAX_THINKING_TOKENS`).
+- **Codex**: configured via the Responses wire, no API key variable needed. Codex's own model picker still lists its built-in GPT names — that list lives inside Codex and can't be replaced, but *every* request goes through ZCodeBridge and is served by GLM regardless of which entry is selected. The "model metadata not found" startup warning for glm models is cosmetic. Type `glm-5.3-max` (or any variant) as a custom model to use max effort.
+- **OpenCode**: `node setup` registers GLM-5.3 / GLM-5.3-Flash plus `GLM-5.3-XHigh`, `GLM-5.3-Max` (and Flash variants) so effort levels beyond its built-in `high` are one model-pick away.
 
 ## Configuration (optional)
 
@@ -85,6 +105,7 @@ Defaults work out of the box. To customize, copy `config.example.json` to `confi
 | --- | --- | --- |
 | `host` / `port` | `HOST` / `PORT` | Listen address (default `127.0.0.1:8787`) |
 | `apiKey` | `PROXY_API_KEY` | Require clients to send this key |
+| `useDefaultAccount` | — | `false` = never read the ZCode desktop login; serve only `accounts/` entries |
 | `baseUrl` | `ZCODE_BASE_URL` | Upstream gateway URL |
 | `defaultModel` / `flashModel` | `DEFAULT_MODEL` / `FLASH_MODEL` | Model ids |
 | `retries` | `UPSTREAM_RETRIES` | Retries for transient upstream errors |
@@ -92,50 +113,13 @@ Defaults work out of the box. To customize, copy `config.example.json` to `confi
 | `dataDir` | `ZCODE_DATA_DIR` | Custom ZCode data directory |
 | `accountsDir` | `ZCODE_ACCOUNTS_DIR` | Custom accounts directory |
 
-## Manual CLI setup (if you prefer no wizard)
-
-**Claude Code**
-
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-export ANTHROPIC_API_KEY=x
-claude -p "hello" --model claude-3-5-haiku-20241022
-```
-
-**Codex** — `~/.codex/config.toml`
-
-```toml
-model = "glm-5.3-flash"
-model_provider = "planbridge"
-
-[model_providers.planbridge]
-name = "PlanBridge"
-base_url = "http://127.0.0.1:8787/v1"
-wire_api = "responses"
-env_key = "PLANBRIDGE_KEY"
-```
-
-**OpenCode** — `~/.config/opencode/opencode.json`
-
-```json
-{
-  "provider": {
-    "planbridge": {
-      "npm": "@ai-sdk/openai-compatible",
-      "options": { "baseURL": "http://127.0.0.1:8787/v1", "apiKey": "x" },
-      "models": { "GLM-5.3": {}, "GLM-5.3-Flash": {} }
-    }
-  }
-}
-```
-
 ## Backup (admin)
 
 ```bash
 node backup.js     # or: npm run backup
 ```
 
-Writes `planbridge-backup.zip` containing the **entire folder including secrets** (accounts, configs). Keep it private; it is gitignored and never committed.
+Writes `zcodebridge-backup.zip` containing the **entire folder including secrets** (accounts, configs). Keep it private; it is gitignored and never committed. A git pre-commit hook refreshes it automatically (`cp deploy/pre-commit .git/hooks/pre-commit`).
 
 ## Testing
 
@@ -143,7 +127,7 @@ Writes `planbridge-backup.zip` containing the **entire folder including secrets*
 node tests/test_regression.mjs    # or: npm test (proxy must be running)
 ```
 
-Covers all endpoints (normal + streaming), tool calls and round trips, system-prompt override, JSON mode, long conversations, and routing routes.
+Covers all endpoints (normal + streaming), tool calls and round trips, system-prompt override, JSON mode, long conversations, and account routing.
 
 ## Project layout
 
@@ -153,7 +137,7 @@ accounts.js      account CLI            models.js    model watcher
 backup.js        admin backup zip       tests/       regression suite
 src/             implementation modules
 prompts/         ZCode system prompt blocks (required)
-deploy/          systemd unit for Linux services
+deploy/          systemd unit + git hook
 ```
 
 ## Notes

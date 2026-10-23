@@ -7,7 +7,7 @@
 const crypto = require('node:crypto');
 const { config } = require('./config');
 const { HttpError } = require('./util');
-const { mapModel } = require('./models');
+const { mapModel, splitEffortSuffix, normalizeEffort } = require('./models');
 const { clampMaxTokens } = require('./upstream');
 const { iterateSse, sseWrite } = require('./sse');
 const {
@@ -122,8 +122,9 @@ function responsesToAnthropic(body) {
         }))
     : [];
 
+  const { base, effort: suffixEffort } = splitEffortSuffix(body.model);
   const anthropic = {
-    model: mapModel(body.model),
+    model: mapModel(base),
     max_tokens: clampMaxTokens(body.max_output_tokens),
     stream: body.stream === true,
     messages,
@@ -161,6 +162,8 @@ function responsesToAnthropic(body) {
       ...(anthropic.output_config || {}),
       effort: effortMap[effort.toLowerCase()] || 'high',
     };
+  } else if (suffixEffort) {
+    anthropic.output_config = { ...(anthropic.output_config || {}), effort: normalizeEffort(suffixEffort) };
   }
 
   return anthropic;

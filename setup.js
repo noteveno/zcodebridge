@@ -2,7 +2,7 @@
 'use strict';
 
 /*
- * PlanBridge setup wizard
+ * ZCodeBridge setup wizard
  * ------------------------
  *   node setup        (or: npm run setup)
  *
@@ -16,8 +16,8 @@ const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 
-const PROXY_URL = process.env.PLANBRIDGE_URL || 'http://127.0.0.1:8787';
-const PROVIDER_KEY = 'planbridge';
+const PROXY_URL = process.env.ZCODEBRIDGE_URL || 'http://127.0.0.1:8787';
+const PROVIDER_KEY = 'zcodebridge';
 
 function configPaths() {
   const home = os.homedir();
@@ -57,8 +57,8 @@ function setupClaude() {
   settings.env = {
     ...(settings.env && typeof settings.env === 'object' ? settings.env : {}),
     ANTHROPIC_BASE_URL: PROXY_URL,
-    ANTHROPIC_AUTH_TOKEN: 'planbridge',
-    ANTHROPIC_API_KEY: 'planbridge',
+    ANTHROPIC_AUTH_TOKEN: 'zcodebridge',
+    ANTHROPIC_API_KEY: 'zcodebridge',
     // Every built-in alias resolves to a GLM model, and sessions start on
     // GLM-5.3 (the picker is restricted to the two GLM models below).
     ANTHROPIC_MODEL: 'GLM-5.3',
@@ -91,7 +91,8 @@ function setupCodex() {
   const backup = backupFile(target);
   let toml = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
 
-  toml = toml.replace(/\n?\[model_providers\.planbridge\][\s\S]*?(?=\n\[|$)/g, '');
+  // Clean up sections from both this tool and its earlier planbridge name.
+  toml = toml.replace(/\n?\[model_providers\.(?:zcodebridge|planbridge)\][\s\S]*?(?=\n\[|$)/g, '');
   toml = toml.replace(/^model_catalog_json\s*=.*$/m, '');
   toml = toml.replace(/\n{3,}/g, '\n\n').trimEnd();
 
@@ -100,13 +101,15 @@ function setupCodex() {
   if (!/^model_reasoning_effort\s*=/m.test(toml)) toml += `model_reasoning_effort = "low"\n`;
 
   // No env_key: the proxy needs no API key, so Codex never nags about a
-  // missing PLANBRIDGE_KEY variable. (Codex may print a cosmetic "model
-  // metadata not found" warning for glm models; its model_catalog_json
-  // config crashes codex 0.164, so it is deliberately not used.)
+  // missing key variable. Codex may print a cosmetic "model metadata not
+  // found" warning for glm models; codex's model_catalog_json option points
+  // at a JSON file whose undocumented positional format breaks codex 0.164,
+  // so it is deliberately not used - all models route to GLM regardless of
+  // what Codex's built-in picker lists.
   toml += [
     '',
     `[model_providers.${PROVIDER_KEY}]`,
-    'name = "PlanBridge proxy"',
+    'name = "ZCodeBridge proxy"',
     `base_url = "${PROXY_URL}/v1"`,
     'wire_api = "responses"',
     '',
@@ -116,7 +119,7 @@ function setupCodex() {
   fs.writeFileSync(target, toml.trimStart() + '\n');
   console.log(`  Codex -> ${target}`);
   if (backup) console.log(`  backup: ${backup}`);
-  console.log('  no API key needed (the PLANBRIDGE_KEY variable is gone)');
+  console.log('  no API key needed (the ZCODEBRIDGE_KEY variable is gone)');
   console.log('  model metadata registered (no more "model metadata not found" warning)');
 }
 
@@ -126,22 +129,28 @@ function setupOpencode() {
   const target = configPaths().opencode;
   const backup = backupFile(target);
   const settings = readJsonOrEmpty(target);
-  settings.provider = {
-    ...(settings.provider && typeof settings.provider === 'object' ? settings.provider : {}),
-    [PROVIDER_KEY]: {
-      npm: '@ai-sdk/openai-compatible',
-      options: { baseURL: `${PROXY_URL}/v1`, apiKey: 'planbridge' },
-      models: {
-        'GLM-5.3': { name: 'GLM-5.3' },
-        'GLM-5.3-Flash': { name: 'GLM-5.3-Flash' },
-      },
+  const providers = settings.provider && typeof settings.provider === 'object' ? { ...settings.provider } : {};
+  delete providers.planbridge; // earlier name of this tool
+  providers[PROVIDER_KEY] = {
+    npm: '@ai-sdk/openai-compatible',
+    options: { baseURL: `${PROXY_URL}/v1`, apiKey: 'zcodebridge' },
+    models: {
+      'GLM-5.3': { name: 'GLM-5.3' },
+      'GLM-5.3-Flash': { name: 'GLM-5.3-Flash' },
+      // OpenCode's effort picker stops at high; these model names carry the
+      // effort to the proxy so xhigh/max stay reachable.
+      'GLM-5.3-XHigh': { name: 'glm-5.3-xhigh' },
+      'GLM-5.3-Max': { name: 'glm-5.3-max' },
+      'GLM-5.3-Flash-XHigh': { name: 'glm-5.3-flash-xhigh' },
+      'GLM-5.3-Flash-Max': { name: 'glm-5.3-flash-max' },
     },
   };
+  settings.provider = providers;
   ensureParent(target);
   fs.writeFileSync(target, JSON.stringify(settings, null, 2) + '\n');
   console.log(`  OpenCode -> ${target}`);
   if (backup) console.log(`  backup: ${backup}`);
-  console.log('  run OpenCode with: opencode run -m planbridge/GLM-5.3-Flash "hello"');
+  console.log('  models: GLM-5.3, GLM-5.3-Flash (+ XHigh/Max effort variants)');
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +194,7 @@ async function makeAsker() {
 async function main() {
   const asker = await makeAsker();
   const ask = asker.ask;
-  console.log('PlanBridge setup');
+  console.log('ZCodeBridge setup');
   console.log(`Proxy address: ${PROXY_URL}`);
   console.log('(start it with: node server.js)\n');
   console.log('Which coding tools should be connected to the proxy?');
