@@ -1,5 +1,6 @@
 # secrets & private state - never commit
 accounts/
+backup/
 config.json
 planbridge-backup.zip
 .memory/

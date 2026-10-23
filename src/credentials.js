@@ -51,7 +51,7 @@ function accountsRoot() {
 }
 
 function accountNames() {
-  const names = [''];
+  const names = config.useDefaultAccount === false ? [] : [''];
   try {
     for (const entry of fs.readdirSync(accountsRoot(), { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;

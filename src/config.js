@@ -24,6 +24,9 @@ function loadConfig() {
     logLevel: 'info',
     dataDir: '',
     accountsDir: '',
+    // When false the proxy never reads the ZCode desktop login and only
+    // serves accounts stored under accounts/ (set it in config.json).
+    useDefaultAccount: true,
     systemPromptDir: path.join(ROOT, 'prompts'),
     cors: true,
   };

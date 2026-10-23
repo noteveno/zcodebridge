@@ -399,7 +399,9 @@ server.on('clientError', (error, socket) => {
 function start() {
   const credentials = (() => {
     try {
-      return loadAccountCredentials();
+      const names = accountNames();
+      if (!names.length) return null;
+      return loadAccountCredentials(names[0]);
     } catch (error) {
       log('warn', error.message);
       return null;

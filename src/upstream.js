@@ -202,6 +202,15 @@ async function upstreamRequestWithRetry(body, options = {}) {
   let forceCredentials = options.forceCredentials === true;
   const allNames = accountNames();
 
+  if (allNames.length === 0) {
+    throw new HttpError(
+      503,
+      'No accounts are configured on the proxy. Add one with: node accounts.js login <name>',
+      'no_accounts',
+      'api_error',
+    );
+  }
+
   // Route around accounts whose token bucket for this model is empty
   // (each model has its own quota). Unknown usage never blocks a request,
   // and a suspected exhaustion is always re-checked against fresh billing
