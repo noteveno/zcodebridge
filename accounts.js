@@ -25,7 +25,6 @@
  */
 
 const fs = require('node:fs');
-const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
@@ -52,8 +51,9 @@ function usage() {
   node accounts.js login [name]
       Z.ai OAuth login for a new account. The name is optional - when
       omitted, the account is named after the signed-in email (part
-      before @). The link is printed, the browser is NOT auto-opened; the
-      callback is captured automatically or paste the URL.
+      before @). After signing in, copy the zcode://oauth/callback?...
+      link from the login-complete page and paste it into the terminal
+      (works from any browser, on any device/network).
   node accounts.js add <name> [credentials.json [telemetry-state.json]]
       Capture the login currently active in the ZCode desktop app.
   node accounts.js usage
@@ -87,83 +87,39 @@ function clientHeaders(extra = {}) {
 // OAuth login
 // ---------------------------------------------------------------------------
 
-function waitForOAuthCallback(port, timeoutMs) {
+// Waits for the user to paste the final zcode:// (or http) callback URL.
+// The chat.z.ai OAuth client only accepts the desktop app's wrapper as
+// redirect_uri, so after login the browser lands on a page whose button
+// links to zcode://oauth/callback?code=...&state=... - the user copies
+// that link (right-click -> Copy link address) and pastes it here.
+function waitForCallbackPaste(timeoutMs) {
   return new Promise((resolve, reject) => {
-    let settled = false;
-    let server;
-    let rl;
-    const timer = setTimeout(() => finish(new Error('Login timed out.')), timeoutMs);
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const timer = setTimeout(() => {
+      rl.close();
+      reject(new Error('Login timed out.'));
+    }, timeoutMs);
 
-    function finish(error, value) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { if (server) server.close(); } catch { /* ignore */ }
-      try { if (rl) rl.close(); } catch { /* ignore */ }
-      if (error) reject(error);
-      else resolve(value);
-    }
-
-    server = http.createServer((req, res) => {
-      try {
-        const url = new URL(req.url, `http://127.0.0.1:${port}`);
-        if (url.pathname !== '/callback') {
-          res.writeHead(404).end();
+    const ask = () => {
+      rl.question('> ', (line) => {
+        const text = (line || '').trim();
+        const codeMatch = /[?&#](?:code|authCode)=([^&\s"']+)/.exec(text);
+        if (codeMatch) {
+          clearTimeout(timer);
+          const stateMatch = /[?&#]state=([^&\s"']+)/.exec(text);
+          console.log('Authorization code received.');
+          rl.close();
+          resolve({
+            code: decodeURIComponent(codeMatch[1]),
+            state: stateMatch ? decodeURIComponent(stateMatch[1]) : null,
+          });
           return;
         }
-        const code = url.searchParams.get('code') || url.searchParams.get('authCode');
-        const state = url.searchParams.get('state');
-        const error = url.searchParams.get('error') || url.searchParams.get('error_description');
-        if (error) {
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-          res.end(`<h2>Login failed</h2><p style="font-family:monospace">${String(error).slice(0, 300)}</p><p>Close this tab and try again.</p>`);
-          finish(new Error(`Login rejected: ${error}`));
-          return;
-        }
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        if (code) {
-          res.end('<h2>Login captured &#10003;</h2><p>You can close this tab and go back to the terminal.</p>');
-          console.log('\nLogin captured, finishing up...');
-          finish(null, { code, state });
-        } else {
-          // Some providers put the code in the URL fragment (#code=...),
-          // which a server never sees - the page below moves it into the
-          // query string and reloads so the CLI receives it.
-          res.end([
-            '<h2>Finishing login...</h2>',
-            '<script>',
-            'var q = new URLSearchParams(location.search);',
-            'var h = new URLSearchParams(location.hash.slice(1));',
-            'h.forEach(function (v, k) { if (!q.has(k)) q.set(k, v); });',
-            'if (q.get("code") || q.get("authCode")) location.replace(location.pathname + "?" + q.toString());',
-            'else document.body.innerHTML = "<h2>Waiting for login...</h2><p>No authorization code reached this page.</p><p>Copy the full URL from the address bar and paste it into the terminal.</p>";',
-            '</script>',
-          ].join('\n'));
-        }
-      } catch (error) {
-        finish(error);
-      }
-    });
-    server.on('error', (error) => finish(error));
-
-    server.listen(port, '127.0.0.1', () => {
-      rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const ask = () => {
-        rl.question('\nIf nothing happens automatically, paste the full URL from the browser address bar here and press Enter:\n> ', (line) => {
-          const text = (line || '').trim();
-          const codeMatch = /[?&#](?:code|authCode)=([^&\s"']+)/.exec(text);
-          if (codeMatch) {
-            const stateMatch = /[?&#]state=([^&\s"']+)/.exec(text);
-            console.log('Code received from pasted URL.');
-            finish(null, { code: decodeURIComponent(codeMatch[1]), state: stateMatch ? decodeURIComponent(stateMatch[1]) : null });
-            return;
-          }
-          console.log('(no code= in that input, still waiting for the browser...)');
-          ask();
-        });
-      };
-      ask();
-    });
+        console.log('That line has no code= parameter. Paste the full zcode://oauth/callback?... link and press Enter.');
+        ask();
+      });
+    };
+    ask();
   });
 }
 
@@ -191,8 +147,11 @@ async function cmdLogin(name) {
   }
 
   const state = crypto.randomUUID();
-  const port = 8917;
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
+  // The chat.z.ai OAuth client only has the desktop app's wrapper page
+  // registered as redirect_uri; anything else (like a localhost URL) is
+  // rejected with "Redirect URI not registered for this client".
+  const redirectUri = `https://zcode.z.ai/app/oauth/login?`
+    + new URLSearchParams({ redirect: 'zcode://oauth/callback', app_version: '3.16.3' });
   const authorizeUrl = `${OAUTH.authorizeUrl}?` + new URLSearchParams({
     redirect_uri: redirectUri,
     response_type: 'code',
@@ -205,15 +164,18 @@ async function cmdLogin(name) {
     : 'Z.ai login (the account will be named after the signed-in email automatically)');
   console.log('\n1. Open this link in your browser and sign in with the account you want to add:');
   console.log('\n   ' + authorizeUrl + '\n');
-  console.log('2. After you approve, the browser is redirected to http://127.0.0.1:' + port + '/callback');
-  console.log('   and this tool detects it automatically.');
-  console.log('   (If your browser runs on another machine: copy the final URL from its address');
-  console.log('    bar and paste it here.)\n');
-  console.log('Waiting for login... (timeout 5 minutes, Ctrl+C to cancel)');
+  console.log('2. After you sign in, the page shows "login complete" and a button that');
+  console.log('   links to zcode://oauth/callback?code=...');
+  console.log('   DO NOT click that button (it would open the ZCode desktop app).');
+  console.log('   Instead: right-click the button -> "Copy link address"');
+  console.log('   (or copy the zcode://... URL from the browser address bar).');
+  console.log('\n3. Paste that link here and press Enter.');
+  console.log('   (This also works from a browser on another device/network.)');
+  console.log('\nWaiting for the callback link... (timeout 10 minutes, Ctrl+C to cancel)');
 
   let callback;
   try {
-    callback = await waitForOAuthCallback(port, 5 * 60 * 1000);
+    callback = await waitForCallbackPaste(10 * 60 * 1000);
   } catch (error) {
     console.error('Login failed: ' + error.message);
     process.exitCode = 1;
