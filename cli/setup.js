@@ -15,8 +15,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
+const { config } = require('../src/config');
 
-const PROXY_URL = process.env.ZCODEBRIDGE_URL || 'http://127.0.0.1:8787';
+// Always derive the address from the proxy's resolved config so a custom
+// port/host in config.json is respected. (A hardcoded default made setup
+// point tools at the wrong port.) ZCODEBRIDGE_URL still wins if set.
+const bindHost = !config.host || config.host === '0.0.0.0' || config.host === '::' ? '127.0.0.1' : config.host;
+const PROXY_URL = process.env.ZCODEBRIDGE_URL || `http://${bindHost}:${config.port}`;
 const PROVIDER_KEY = 'zcodebridge';
 
 function configPaths() {
@@ -131,6 +136,7 @@ function writeCodexCatalog(catalogFile) {
       mk('glm-5.3-flash', 'GLM-5.3 Flash (ZCode)', 'Fast GLM-5.3-Flash through ZCodeBridge - 1M token context', 110, 'low'),
     ],
   };
+  ensureParent(catalogFile);
   fs.writeFileSync(catalogFile, JSON.stringify(catalog, null, 2));
 }
 
