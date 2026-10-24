@@ -95,7 +95,7 @@ Effort scales map cleanly: the upstream supports `low`, `high`, `max`; client sc
 
 - **Claude Code**: `node setup` restricts the model picker to GLM-5.3 / GLM-5.3 Flash and maps every built-in alias to them. Thinking works (`MAX_THINKING_TOKENS`).
 - **Codex**: configured via the Responses wire, no API key variable needed. Codex's own model picker still lists its built-in GPT names — that list lives inside Codex and can't be replaced, but *every* request goes through ZCodeBridge and is served by GLM regardless of which entry is selected. The "model metadata not found" startup warning for glm models is cosmetic. Type `glm-5.3-max` (or any variant) as a custom model to use max effort.
-- **OpenCode**: `node setup` registers GLM-5.3 / GLM-5.3-Flash plus `GLM-5.3-XHigh`, `GLM-5.3-Max` (and Flash variants) so effort levels beyond its built-in `high` are one model-pick away.
+- **OpenCode**: `node setup` registers exactly two models — **GLM-5.3 (ZCode)** and **GLM-5.3-Flash (ZCode)** — with reasoning enabled, so the `/efforts` picker works (thinking is shown too). Note: opencode 2.1.x hardcodes its effort list to *default / low / medium / high* and rejects per-model effort configuration (it treats it as a legacy setting), so `xhigh`/`max` are not selectable there — pick `high`; the full `xhigh`/`max` range is available in Claude Code and Codex.
 
 ## Configuration (optional)
 

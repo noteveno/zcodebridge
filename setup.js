@@ -91,14 +91,34 @@ function setupCodex() {
   const backup = backupFile(target);
   let toml = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
 
-  // Clean up sections from both this tool and its earlier planbridge name.
+  // Clean up sections from this tool and its earlier planbridge name.
   toml = toml.replace(/\n?\[model_providers\.(?:zcodebridge|planbridge)\][\s\S]*?(?=\n\[|$)/g, '');
   toml = toml.replace(/^model_catalog_json\s*=.*$/m, '');
-  toml = toml.replace(/\n{3,}/g, '\n\n').trimEnd();
 
-  if (!/^model_provider\s*=/m.test(toml)) toml += `\nmodel_provider = "${PROVIDER_KEY}"\n`;
-  if (!/^model\s*=/m.test(toml)) toml += `model = "glm-5.3-flash"\n`;
-  if (!/^model_reasoning_effort\s*=/m.test(toml)) toml += `model_reasoning_effort = "low"\n`;
+  // Top-level keys must precede any [section] header - appended keys would
+  // land inside the last table (e.g. [tui]) and codex would silently ignore
+  // them ("Model provider not found" / requests going to api.openai.com).
+  // Rebuild: our defaults on top, then the original top-level keys (minus
+  // stale planbridge references), then all sections untouched.
+  const firstSection = toml.search(/^\s*\[/m);
+  let head = firstSection === -1 ? toml : toml.slice(0, firstSection);
+  const rest = firstSection === -1 ? '' : toml.slice(firstSection);
+
+  head = head
+    .replace(/^model_provider\s*=.*$/m, '')
+    .replace(/^model\s*=.*$/m, '')
+    .replace(/^model_reasoning_effort\s*=.*$/m, '');
+
+  const topLevel = [
+    `model_provider = "${PROVIDER_KEY}"`,
+    'model = "glm-5.3-flash"',
+    'model_reasoning_effort = "low"',
+    '',
+    head.trim(),
+  ].filter((part, index) => index !== 4 || part).join('\n');
+
+  toml = rest ? `${topLevel}\n\n${rest.trimEnd()}\n` : `${topLevel}\n`;
+  toml = toml.replace(/\n{3,}/g, '\n\n').trim();
 
   // No env_key: the proxy needs no API key, so Codex never nags about a
   // missing key variable. Codex may print a cosmetic "model metadata not
@@ -114,6 +134,17 @@ function setupCodex() {
     'wire_api = "responses"',
     '',
   ].join('\n');
+
+  // Old setup versions left our keys inside the [tui] table (they were
+  // appended after that section header). Remove them there; [tui] accepts
+  // none of these settings.
+  const stripTuiStrays = (text) => text.replace(/(\[tui\][^\[]*)/m, (section) =>
+    section
+      .split('\n')
+      .filter((line) => !/^(model_provider|model|model_reasoning_effort)\s*=/.test(line.trim()))
+      .join('\n'),
+  );
+  toml = stripTuiStrays(toml);
 
   ensureParent(target);
   fs.writeFileSync(target, toml.trimStart() + '\n');
@@ -135,14 +166,8 @@ function setupOpencode() {
     npm: '@ai-sdk/openai-compatible',
     options: { baseURL: `${PROXY_URL}/v1`, apiKey: 'zcodebridge' },
     models: {
-      'GLM-5.3': { name: 'GLM-5.3' },
-      'GLM-5.3-Flash': { name: 'GLM-5.3-Flash' },
-      // OpenCode's effort picker stops at high; these model names carry the
-      // effort to the proxy so xhigh/max stay reachable.
-      'GLM-5.3-XHigh': { name: 'glm-5.3-xhigh' },
-      'GLM-5.3-Max': { name: 'glm-5.3-max' },
-      'GLM-5.3-Flash-XHigh': { name: 'glm-5.3-flash-xhigh' },
-      'GLM-5.3-Flash-Max': { name: 'glm-5.3-flash-max' },
+      'GLM-5.3': { name: 'GLM-5.3 (ZCode)', reasoning: true },
+      'GLM-5.3-Flash': { name: 'GLM-5.3-Flash (ZCode)', reasoning: true },
     },
   };
   settings.provider = providers;
@@ -150,7 +175,8 @@ function setupOpencode() {
   fs.writeFileSync(target, JSON.stringify(settings, null, 2) + '\n');
   console.log(`  OpenCode -> ${target}`);
   if (backup) console.log(`  backup: ${backup}`);
-  console.log('  models: GLM-5.3, GLM-5.3-Flash (+ XHigh/Max effort variants)');
+  console.log('  models: GLM-5.3 (ZCode), GLM-5.3-Flash (ZCode)');
+  console.log('  effort picker: default/low/medium/high (fixed list in opencode 2.1.x; xhigh/max reachable via other tools)');
 }
 
 // ---------------------------------------------------------------------------
