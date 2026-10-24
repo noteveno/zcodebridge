@@ -86,6 +86,54 @@ function setupClaude() {
 
 // --- Codex ----------------------------------------------------------------
 
+// Writes the model catalog codex loads via model_catalog_json. The base
+// instructions are codex's own fallback agent template (kept verbatim in
+// deploy/codex-base-instructions.txt) so GLM sessions get the same
+// tool-use guidance as built-in models.
+function writeCodexCatalog(catalogFile) {
+  let template;
+  try {
+    template = fs.readFileSync(path.join(__dirname, 'deploy', 'codex-base-instructions.txt'), 'utf8').trim();
+  } catch {
+    template = 'You are Codex, a coding assistant. Use the available tools to complete tasks.';
+  }
+  const efforts = [
+    { effort: 'low', description: 'Fast responses, light reasoning' },
+    { effort: 'medium', description: 'Balanced reasoning' },
+    { effort: 'high', description: 'Thorough reasoning' },
+    { effort: 'xhigh', description: 'Extra thorough reasoning' },
+    { effort: 'max', description: 'Maximum reasoning depth' },
+  ];
+  const mk = (slug, name, description, priority, defaultEffort) => ({
+    slug,
+    display_name: name,
+    description,
+    base_instructions: template,
+    default_reasoning_level: defaultEffort,
+    supported_reasoning_levels: efforts,
+    shell_type: 'unified_exec',
+    visibility: 'list',
+    supported_in_api: true,
+    priority,
+    default_reasoning_summary: 'auto',
+    support_verbosity: false,
+    truncation_policy: { mode: 'tokens', limit: 100000 },
+    experimental_supported_tools: [],
+    context_window: 1048576,
+    max_context_window: 1048576,
+    effective_context_window_percent: 80,
+    input_modalities: ['text', 'image'],
+    supports_reasoning_summary_parameter: true,
+  });
+  const catalog = {
+    models: [
+      mk('glm-5.3', 'GLM-5.3 (ZCode)', 'Flagship GLM-5.3 through ZCodeBridge - 1M token context', 120, 'medium'),
+      mk('glm-5.3-flash', 'GLM-5.3 Flash (ZCode)', 'Fast GLM-5.3-Flash through ZCodeBridge - 1M token context', 110, 'low'),
+    ],
+  };
+  fs.writeFileSync(catalogFile, JSON.stringify(catalog, null, 2));
+}
+
 function setupCodex() {
   const target = configPaths().codex;
   const backup = backupFile(target);
@@ -104,28 +152,33 @@ function setupCodex() {
   let head = firstSection === -1 ? toml : toml.slice(0, firstSection);
   const rest = firstSection === -1 ? '' : toml.slice(firstSection);
 
+  // Custom model catalog: puts the GLM models into Codex's model picker
+  // (with xhigh/max efforts and the real 1M context window) and removes
+  // the "model metadata not found" warning. Format reverse-engineered from
+  // codex's ModelsResponse/ModelInfo (protocol/src/openai_models.rs).
+  const catalogFile = path.join(path.dirname(target), 'zcodebridge-models.json');
+  writeCodexCatalog(catalogFile);
+  const catalogSetting = `model_catalog_json = "${catalogFile.split(path.sep).join('/')}"`;
+
   head = head
     .replace(/^model_provider\s*=.*$/m, '')
     .replace(/^model\s*=.*$/m, '')
     .replace(/^model_reasoning_effort\s*=.*$/m, '');
 
   const topLevel = [
+    catalogSetting,
     `model_provider = "${PROVIDER_KEY}"`,
     'model = "glm-5.3-flash"',
     'model_reasoning_effort = "low"',
     '',
     head.trim(),
-  ].filter((part, index) => index !== 4 || part).join('\n');
+  ].filter((part, index) => index !== 5 || part).join('\n');
 
   toml = rest ? `${topLevel}\n\n${rest.trimEnd()}\n` : `${topLevel}\n`;
   toml = toml.replace(/\n{3,}/g, '\n\n').trim();
 
   // No env_key: the proxy needs no API key, so Codex never nags about a
-  // missing key variable. Codex may print a cosmetic "model metadata not
-  // found" warning for glm models; codex's model_catalog_json option points
-  // at a JSON file whose undocumented positional format breaks codex 0.164,
-  // so it is deliberately not used - all models route to GLM regardless of
-  // what Codex's built-in picker lists.
+  // missing key variable.
   toml += [
     '',
     `[model_providers.${PROVIDER_KEY}]`,
@@ -141,7 +194,7 @@ function setupCodex() {
   const stripTuiStrays = (text) => text.replace(/(\[tui\][^\[]*)/m, (section) =>
     section
       .split('\n')
-      .filter((line) => !/^(model_provider|model|model_reasoning_effort)\s*=/.test(line.trim()))
+      .filter((line) => !/^(model_provider|model|model_reasoning_effort|model_catalog_json)\s*=/.test(line.trim()))
       .join('\n'),
   );
   toml = stripTuiStrays(toml);
@@ -150,8 +203,9 @@ function setupCodex() {
   fs.writeFileSync(target, toml.trimStart() + '\n');
   console.log(`  Codex -> ${target}`);
   if (backup) console.log(`  backup: ${backup}`);
-  console.log('  no API key needed (the ZCODEBRIDGE_KEY variable is gone)');
-  console.log('  model metadata registered (no more "model metadata not found" warning)');
+  console.log(`  model catalog -> ${catalogFile}`);
+  console.log('  picker shows GLM-5.3 (ZCode) / GLM-5.3-Flash (ZCode) with low..max efforts');
+  console.log('  no API key needed');
 }
 
 // --- OpenCode -------------------------------------------------------------
@@ -160,23 +214,42 @@ function setupOpencode() {
   const target = configPaths().opencode;
   const backup = backupFile(target);
   const settings = readJsonOrEmpty(target);
-  const providers = settings.provider && typeof settings.provider === 'object' ? { ...settings.provider } : {};
-  delete providers.planbridge; // earlier name of this tool
-  providers[PROVIDER_KEY] = {
-    npm: '@ai-sdk/openai-compatible',
-    options: { baseURL: `${PROXY_URL}/v1`, apiKey: 'zcodebridge' },
-    models: {
-      'GLM-5.3': { name: 'GLM-5.3 (ZCode)', reasoning: true },
-      'GLM-5.3-Flash': { name: 'GLM-5.3-Flash (ZCode)', reasoning: true },
+  // v2 config format ("providers", plural). The v1 "provider" key is
+  // deprecated and its normalizer silently drops "capabilities" - which is
+  // what carries the effort list. Capabilities give the /efforts picker the
+  // full range (low/medium/high/xhigh/max) for openai-compatible models.
+  delete settings.provider;
+  delete settings.providers?.planbridge;
+  delete settings.providers?.zcodebridge;
+  settings.$schema = settings.$schema || 'https://opencode.ai/config.json';
+  settings.providers = {
+    ...(settings.providers && typeof settings.providers === 'object' ? settings.providers : {}),
+    [PROVIDER_KEY]: {
+      name: 'ZCodeBridge',
+      package: '@opencode/ai/providers/openai-compatible',
+      settings: { baseURL: `${PROXY_URL}/v1`, apiKey: 'zcodebridge' },
+      models: {
+        'GLM-5.3': {
+          name: 'GLM-5.3 (ZCode)',
+          capabilities: {
+            reasoning: { supported: true, effort: ['low', 'medium', 'high', 'xhigh', 'max'] },
+          },
+        },
+        'GLM-5.3-Flash': {
+          name: 'GLM-5.3-Flash (ZCode)',
+          capabilities: {
+            reasoning: { supported: true, effort: ['low', 'medium', 'high', 'xhigh', 'max'] },
+          },
+        },
+      },
     },
   };
-  settings.provider = providers;
   ensureParent(target);
   fs.writeFileSync(target, JSON.stringify(settings, null, 2) + '\n');
   console.log(`  OpenCode -> ${target}`);
   if (backup) console.log(`  backup: ${backup}`);
   console.log('  models: GLM-5.3 (ZCode), GLM-5.3-Flash (ZCode)');
-  console.log('  effort picker: default/low/medium/high (fixed list in opencode 2.1.x; xhigh/max reachable via other tools)');
+  console.log('  /efforts picker: low, medium, high, xhigh, max');
 }
 
 // ---------------------------------------------------------------------------
