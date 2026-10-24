@@ -27,7 +27,7 @@ node setup            # connect Claude Code / Codex / OpenCode (your choice)
 That's it — no `npm install`, no build step. If you've signed into ZCode before, the proxy works with that account immediately; otherwise add one right away:
 
 ```bash
-node accounts.js login
+node accounts login
 ```
 
 (To run as a service on Linux, see `deploy/zcodebridge.service`.)
@@ -35,12 +35,12 @@ node accounts.js login
 ## Adding accounts
 
 ```bash
-node accounts.js login            # name is derived from the account email automatically
-node accounts.js login work       # ...or give it an explicit name
-node accounts.js add <name>       # or capture the login from the ZCode desktop app
-node accounts.js list             # all accounts
-node accounts.js usage            # live tokens used/left + expiry per account
-node accounts.js remove <name>
+node accounts login            # name is derived from the account email automatically
+node accounts login work       # ...or give it an explicit name
+node accounts add <name>       # or capture the login from the ZCode desktop app
+node accounts list             # all accounts
+node accounts usage            # live tokens used/left + expiry per account
+node accounts remove <name>
 ```
 
 `login` prints a link you open in any browser yourself (nothing auto-opens — the browser can be on any device or network). After you sign in:
@@ -68,7 +68,7 @@ With several accounts:
 curl http://127.0.0.1:8787/v1/usage
 ```
 
-Shows per account: active plans, expiry, per-model buckets (total / used / remaining / reset time), and a `plan_status` field (`active`, or "one-time plan tokens finished; using daily tokens …"). Add `x-refresh-usage: 1` to bypass the 30-second cache. `node accounts.js usage` prints a friendly version.
+Shows per account: active plans, expiry, per-model buckets (total / used / remaining / reset time), and a `plan_status` field (`active`, or "one-time plan tokens finished; using daily tokens …"). Add `x-refresh-usage: 1` to bypass the 30-second cache. `node accounts usage` prints a friendly version.
 
 ## Models
 

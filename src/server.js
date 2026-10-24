@@ -133,6 +133,13 @@ async function handleModels(req, res) {
   sendJson(res, 200, { object: 'list', data: modelList([...canonical]) });
 }
 
+// A daily-reset bucket spans about a day between period_start and period_end;
+// the big one-time grants span days or the whole plan lifetime.
+function isDailyBucket(balance, nowMs) {
+  if (!balance || !balance.period_start || !balance.period_end) return false;
+  return (balance.period_end - balance.period_start) <= 1.5 * 24 * 3600;
+}
+
 async function handleUsage(req, res) {
   const names = accountNames();
   const accounts = await Promise.all(names.map(async (name) => {
@@ -173,8 +180,8 @@ async function handleUsage(req, res) {
       // Distinguish the big one-time grants from daily-reset buckets so the
       // "plan finished, on daily tokens now" state is visible.
       const dayMs = 24 * 3600 * 1000;
-      const oneTime = balances.filter((b) => !b.period_end || (b.period_end * 1000 - nowMs) > 3 * dayMs);
-      const daily = balances.filter((b) => b.period_end && (b.period_end * 1000 - nowMs) <= 3 * dayMs);
+      const oneTime = balances.filter((b) => !isDailyBucket(b, nowMs));
+      const daily = balances.filter((b) => isDailyBucket(b, nowMs));
       const oneTimeLeft = oneTime.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
       const dailyLeft = daily.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
       if (oneTime.length && oneTimeLeft <= 0 && dailyLeft > 0) {

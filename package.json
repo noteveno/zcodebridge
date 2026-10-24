@@ -1,6 +1,6 @@
 {
   "name": "zcodebridge",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "description": "Use your ZCode / Z.ai plan through OpenAI-, Anthropic- and Responses-compatible APIs - works with Claude Code, Codex, OpenCode and any SDK. Zero dependencies.",
   "main": "server.js",
   "scripts": {

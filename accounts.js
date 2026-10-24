@@ -4,7 +4,7 @@
 /*
  * zcode2proxy account manager
  * --------------------------------
- * node accounts.js login <name>
+ * node accounts login <name>
  *     Start a Z.ai OAuth login for a NEW account. Prints a link you open
  *     in your browser yourself (nothing opens automatically). After you
  *     log in, the code is captured automatically on
@@ -12,16 +12,16 @@
  *     here. The account is stored under accounts/<name>/ and any free
  *     coding plan is claimed automatically.
  *
- * node accounts.js add <name> [credentials.json [telemetry-state.json]]
+ * node accounts add <name> [credentials.json [telemetry-state.json]]
  *     Capture the login currently active in the ZCode desktop app.
  *
- * node accounts.js usage
+ * node accounts usage
  *     Live plan usage for every account (tokens used/left, expiry).
  *
- * node accounts.js claim [name]
+ * node accounts claim [name]
  *     Claim any available free plan for an account.
  *
- * node accounts.js list | remove <name> | path
+ * node accounts list | remove <name> | path
  */
 
 const fs = require('node:fs');
@@ -47,24 +47,26 @@ const OAUTH = {
 };
 
 function usage() {
-  console.log(`usage:
-  node accounts.js login [name]
+  console.log(`
+  ${ui.bold('ZCodeBridge')} ${ui.dim('· account manager')}
+
+  ${ui.cyan('node accounts login')} ${ui.dim('[name]')}
       Z.ai OAuth login for a new account. The name is optional - when
       omitted, the account is named after the signed-in email (part
       before @). After signing in, copy the zcode://oauth/callback?...
       link from the login-complete page and paste it into the terminal
       (works from any browser, on any device/network).
-  node accounts.js add <name> [credentials.json [telemetry-state.json]]
+  ${ui.cyan('node accounts add')} ${ui.dim('<name> [credentials.json [telemetry-state.json]]')}
       Capture the login currently active in the ZCode desktop app.
-  node accounts.js usage
-      Live plan usage (tokens used/left, expiry) for every account.
-  node accounts.js claim [name]
+  ${ui.cyan('node accounts usage')}
+      Live plan usage: token bars, remaining amounts, expiry countdowns.
+  ${ui.cyan('node accounts claim')} ${ui.dim('[name]')}
       Claim any available free coding plan.
-  node accounts.js list
-      Show all accounts with email and token expiry.
-  node accounts.js remove <name>
-      Delete a stored account (the default login is never touched).
-  node accounts.js path
+  ${ui.cyan('node accounts list')}
+      Show all accounts with email and token status.
+  ${ui.cyan('node accounts remove')} ${ui.dim('<name>')}
+      Delete a stored account (the desktop-app login is never touched).
+  ${ui.cyan('node accounts path')}
       Print the accounts directory.`);
 }
 
@@ -136,7 +138,7 @@ function deriveAccountName(email, uuid) {
 
 async function cmdLogin(name) {
   if (name && !/^[A-Za-z0-9._-]+$/.test(name)) {
-    console.error('Usage: node accounts.js login [name]   (letters, digits, . _ -; or omit to name it after the account email)');
+    console.error('Usage: node accounts login [name]   (letters, digits, . _ -; or omit to name it after the account email)');
     process.exitCode = 1;
     return;
   }
@@ -297,58 +299,110 @@ function formatTokens(n) {
   return String(value);
 }
 
-async function printAccountUsage(credentials) {
-  try {
-    const data = await fetchAccountUsage(credentials, true);
-    const nowMs = (data.server_time ? data.server_time * 1000 : Date.now());
-    const balances = Array.isArray(data.balances) ? data.balances : [];
-    const plans = Array.isArray(data.plans) ? data.plans : [];
-    const active = plans.filter((p) => p.status === 'active');
-    if (active.length) {
-      const endsAt = Math.max(...active.map((p) => p.ends_at));
-      const left = endsAt * 1000 - nowMs;
-      console.log(`Plan: ${active.map((p) => p.name).join(' + ')} - ${left > 0
-        ? `expires ${new Date(endsAt * 1000).toISOString().slice(0, 19).replace('T', ' ')} (${Math.floor(left / 86400000)}d ${Math.floor((left % 86400000) / 3600000)}h left)`
-        : 'EXPIRED'}`);
-    } else {
-      console.log('Plan: none active (claim one with: node accounts.js claim ' + (credentials.name || '') + ')');
+// --- pretty terminal output (plain when not a TTY, so piping stays clean) ---
+
+const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+const paint = (code, text) => (useColor ? `\x1b[${code}m${text}\x1b[0m` : text);
+const ui = {
+  bold: (t) => paint('1', t),
+  dim: (t) => paint('2', t),
+  cyan: (t) => paint('36', t),
+  green: (t) => paint('32', t),
+  yellow: (t) => paint('33', t),
+  red: (t) => paint('31', t),
+  rule: (t) => paint('2', t),
+};
+
+function bar(ratio) {
+  const pct = Math.max(0, Math.min(100, ratio * 100));
+  const cells = 20;
+  const filled = Math.round((pct / 100) * cells);
+  const body = '█'.repeat(filled) + '░'.repeat(cells - filled);
+  const colored = pct > 50 ? ui.green(body) : pct >= 15 ? ui.yellow(body) : ui.red(body);
+  return `${colored} ${String(pct.toFixed(pct >= 100 || pct === 0 ? 0 : 1)).padStart(5)}%`;
+}
+
+function timeLeft(ms) {
+  if (ms <= 0) return ui.red('expired');
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const text = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return d >= 1 ? ui.green(text) : ui.yellow(text);
+}
+
+function dateShort(seconds) {
+  if (!seconds) return '-';
+  const d = new Date(seconds * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCMonth() + 1}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+}
+
+function printAccountUsage(credentials) {
+  return printAccountUsageImpl(credentials).catch((error) => {
+    console.error(`  ${ui.red('usage check failed:')} ${error.message}`);
+  });
+}
+
+async function printAccountUsageImpl(credentials) {
+  const data = await fetchAccountUsage(credentials, true);
+  const nowMs = (data.server_time ? data.server_time * 1000 : Date.now());
+  const balances = Array.isArray(data.balances) ? data.balances : [];
+  const plans = Array.isArray(data.plans) ? data.plans : [];
+  const active = plans.filter((p) => p.status === 'active');
+
+  if (active.length) {
+    for (const plan of active) {
+      console.log(`    ${ui.cyan('plans')}   ${plan.name} ${ui.dim(`· expires ${dateShort(plan.ends_at)} · ${timeLeft(plan.ends_at * 1000 - nowMs)} left`)}`);
     }
-    for (const b of balances) {
-      console.log(`  ${String(b.show_name || '?').padEnd(14)} used ${formatTokens(b.used_units)} / ${formatTokens(b.total_units)}  remaining ${formatTokens(b.remaining_units)}  resets ${b.period_end ? new Date(b.period_end * 1000).toISOString().slice(0, 19).replace('T', ' ') : '-'}`);
-    }
-    if (!balances.length) {
-      console.log('  (no token buckets found)');
-      return;
-    }
-    // One-time grants (the big e.g. 300M buckets) vs daily-reset buckets.
-    const dayMs = 24 * 3600 * 1000;
-    const oneTime = balances.filter((b) => !b.period_end || (b.period_end * 1000 - nowMs) > 3 * dayMs);
-    const daily = balances.filter((b) => b.period_end && (b.period_end * 1000 - nowMs) <= 3 * dayMs);
-    const oneTimeLeft = oneTime.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
-    const dailyLeft = daily.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
-    if (oneTime.length && oneTimeLeft <= 0) {
-      if (dailyLeft > 0) {
-        const nextReset = Math.min(...daily.filter((b) => (Number(b.remaining_units) || 0) > 0).map((b) => b.period_end * 1000));
-        console.log(`  >> The one-time plan tokens are finished - back to using daily tokens (${formatTokens(dailyLeft)} left, next refill ${new Date(nextReset).toISOString().slice(0, 19).replace('T', ' ')}).`);
-      } else {
-        const nextReset = daily.length ? Math.min(...daily.map((b) => b.period_end * 1000)) : null;
-        console.log(`  >> All tokens are used up. ${nextReset ? `Daily tokens refill at ${new Date(nextReset).toISOString().slice(0, 19).replace('T', ' ')} - ` : ''}or add another account: node accounts.js login`);
-      }
-    }
-  } catch (error) {
-    console.error('Usage check failed: ' + error.message);
+  } else {
+    console.log(`    ${ui.cyan('plans')}   ${ui.yellow('none active')} ${ui.dim(`(node accounts claim ${credentials.name || ''})`)}`);
+  }
+
+  if (!balances.length) {
+    console.log(`    ${ui.dim('(no token buckets found)')}`);
+    return;
+  }
+  console.log();
+  for (const b of balances) {
+    const remaining = Math.max(0, Number(b.remaining_units) || 0);
+    const total = Math.max(1, Number(b.total_units) || 1);
+    const daily = b.period_start && b.period_end && (b.period_end - b.period_start) <= 1.5 * 24 * 3600;
+    const tag = daily ? ui.dim('daily') : ui.dim('plan ');
+    const name = String(b.show_name || '?').padEnd(14);
+    console.log(`    ${ui.bold(name)} ${bar(remaining / total)}  ${ui.bold(formatTokens(remaining))} ${ui.dim(`of ${formatTokens(b.total_units)} left`)}  ${tag} ${ui.dim(`resets ${dateShort(b.period_end)}`)}`);
+  }
+
+  // One-time grants (the big e.g. 300M buckets) vs daily-reset buckets.
+  const dayMs = 24 * 3600 * 1000;
+  const oneTime = balances.filter((b) => !b.period_end || (b.period_end * 1000 - nowMs) > 3 * dayMs);
+  const dailyBuckets = balances.filter((b) => b.period_start && b.period_end && (b.period_end - b.period_start) <= 1.5 * 24 * 3600);
+  const oneTimeLeft = oneTime.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
+  const dailyLeft = dailyBuckets.reduce((sum, b) => sum + (Number(b.remaining_units) || 0), 0);
+  console.log();
+  if (oneTime.length && oneTimeLeft <= 0 && dailyLeft > 0) {
+    const nextReset = Math.min(...dailyBuckets.filter((b) => (Number(b.remaining_units) || 0) > 0).map((b) => b.period_end));
+    console.log(`    ${ui.yellow('›')} one-time plan tokens finished - running on daily tokens (${formatTokens(dailyLeft)} left, refill ${dateShort(nextReset)})`);
+  } else if (oneTime.length && oneTimeLeft <= 0) {
+    const nextReset = dailyBuckets.length ? Math.min(...dailyBuckets.map((b) => b.period_end)) : null;
+    console.log(`    ${ui.red('›')} all tokens used up${nextReset ? ` - daily refill ${dateShort(nextReset)}` : ''} ${ui.dim('or add an account: node accounts login')}`);
   }
 }
 
 async function cmdUsage() {
-  for (const name of accountNames()) {
-    console.log(`\n=== ${name || '(default)'} ===`);
+  const names = accountNames();
+  console.log(`\n  ${ui.bold('ZCodeBridge')} ${ui.dim('·')} ${ui.cyan('plan usage')} ${ui.dim(`· ${names.length} account${names.length === 1 ? '' : 's'}`)}\n`);
+  for (const name of names) {
     try {
       const credentials = loadAccountCredentials(name);
-      console.log(`user: ${credentials.userInfo.email || credentials.accountUuid || 'unknown'}`);
+      const email = credentials.userInfo.email || credentials.accountUuid || 'unknown';
+      console.log(`  ${ui.rule('─'.repeat(72))}`);
+      console.log(`  ${ui.green('●')} ${ui.bold(name || '(default)')} ${ui.dim(`· ${email}`)}`);
+      console.log(`  ${ui.rule('─'.repeat(72))}`);
       await printAccountUsage(credentials);
+      console.log();
     } catch (error) {
-      console.error('  ' + error.message);
+      console.log(`  ${ui.red('●')} ${ui.bold(name || '(default)')} ${ui.dim('·')} ${ui.red(error.message)}\n`);
     }
   }
 }
@@ -431,7 +485,7 @@ function cmdAdd(name, credFile, telemetryFile) {
   if (!fs.existsSync(sourceCred)) {
     console.error(credFile
       ? `File not found: ${sourceCred}`
-      : `No ZCode login found at ${sourceCred}. Use "node accounts.js login ${name}" instead.`);
+      : `No ZCode login found at ${sourceCred}. Use "node accounts login ${name}" instead.`);
     process.exitCode = 1;
     return;
   }
@@ -469,24 +523,26 @@ function cmdAdd(name, credFile, telemetryFile) {
 
 function cmdList() {
   const names = accountNames();
-  console.log(`Accounts directory: ${accountsRoot()}`);
+  console.log(`\n  ${ui.bold('ZCodeBridge')} ${ui.dim('·')} ${ui.cyan('accounts')} ${ui.dim(`· ${names.length} configured · ${accountsRoot()}`)}\n`);
   for (const name of names) {
-    const label = name || '(default)';
+    const label = (name || '(default)').padEnd(18);
     const file = name
       ? path.join(accountsRoot(), name, 'credentials.json')
       : path.join(zcodeHome(), 'v2', 'credentials.json');
     try {
       const info = readCredentialsInfo(file);
-      console.log(`  ${label.padEnd(20)} ${info.email || info.uuid || 'unknown user'}  ${formatExpiry(info.expiresAt)}`);
+      console.log(`  ${ui.green('●')} ${ui.bold(label)} ${(info.email || info.uuid || 'unknown user').padEnd(28)} ${ui.dim(formatExpiry(info.expiresAt))}`);
     } catch (error) {
-      console.log(`  ${label.padEnd(20)} unreadable: ${error.message}`);
+      console.log(`  ${ui.red('●')} ${ui.bold(label)} ${ui.red('unreadable: ' + error.message)}`);
     }
   }
+  console.log();
   if (names.length > 1) {
-    console.log('\nRequests rotate across all accounts. Pin one with the header: x-zcode-account: <name>');
+    console.log(`  ${ui.dim('Requests rotate across all accounts · pin one with header')} ${ui.cyan('x-zcode-account: <name>')}`);
   } else {
-    console.log('\nAdd more accounts with: node accounts.js login <name>');
+    console.log(`  ${ui.dim('Add more accounts with:')} ${ui.cyan('node accounts login')}`);
   }
+  console.log(`  ${ui.dim('Live usage:')} ${ui.cyan('node accounts usage')}\n`);
 }
 
 function cmdRemove(name) {
