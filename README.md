@@ -38,7 +38,7 @@ node accounts login
 node server           # start the proxy (beautiful banner, live stats)
 node auth             # add a Z.ai account (interactive OAuth, auto-named)
 node usage            # live plan usage: token bars, expiry countdowns
-node stats            # proxy requests + tokens per day / week / all time
+node stats            # requests + tokens per day/week/all time + cache hit rate
 node list             # all configured accounts
 node claim [name]     # claim any free plan Z.ai offers
 node add <name>       # capture the login from the ZCode desktop app
@@ -76,7 +76,7 @@ With several accounts:
 curl http://127.0.0.1:8787/v1/usage
 ```
 
-Also available: `curl /v1/stats` (or `node stats`) - requests and tokens per day, week, and all time, per model and per account.
+Also available: `curl /v1/stats` (or `node stats`) - requests and tokens per day, week, and all time, per model and per account, including the prompt-cache hit rate.
 
 Shows per account: active plans, expiry, per-model buckets (total / used / remaining / reset time), and a `plan_status` field (`active`, or "one-time plan tokens finished; using daily tokens …"). Add `x-refresh-usage: 1` to bypass the 30-second cache. `node accounts usage` prints a friendly version.
 

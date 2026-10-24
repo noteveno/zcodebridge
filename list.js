@@ -1,4 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// `node list` - all configured accounts.
-require('./accounts.js').cmdList();
+
+// Thin wrapper - the implementation lives in cli/.
+const { cmdList } = require('./cli/accounts');
+cmdList();

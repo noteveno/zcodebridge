@@ -501,6 +501,21 @@ function printBanner() {
   console.log('');
 }
 
+// Friendly handling when the proxy is already running (very common when
+// starting `node server` twice or when the background service owns it).
+server.on('error', (error) => {
+  if (error && error.code === 'EADDRINUSE') {
+    console.log(`\n  ${paint('33', '!')} ZCodeBridge is ${paint('1', 'already running')} at ${c(`http://${config.host}:${config.port}`)}`);
+    console.log(`    ${d('Nothing to fix - this new instance will exit.')}`);
+    console.log(`    ${d('Open the running one in another terminal, or stop it first:')}`);
+    console.log(`      ${c('node stats')}          ${d('(see live numbers from the running proxy)')}`);
+    console.log(`      ${d('netstat -ano | findstr ' + config.port + '  ->  taskkill /PID <pid> /F')}\n`);
+    process.exit(1);
+  }
+  console.error(`\n  ${paint('31', 'server error:')} ${error.message}`);
+  process.exit(1);
+});
+
 function start() {
   const credentials = (() => {
     try {

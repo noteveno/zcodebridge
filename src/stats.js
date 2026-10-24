@@ -10,7 +10,7 @@ const { ROOT } = require('./config');
 const FILE = path.join(ROOT, 'stats.json');
 
 function emptyDay() {
-  return { requests: 0, streams: 0, errors: 0, tokensIn: 0, tokensOut: 0, models: {}, accounts: {} };
+  return { requests: 0, streams: 0, errors: 0, tokensIn: 0, tokensOut: 0, cacheIn: 0, models: {}, accounts: {} };
 }
 
 let data = { days: {} };
@@ -59,19 +59,23 @@ function noteRequest({ account = '', model = '', stream = false, error = false }
 function noteUsage({ account = '', model = '', usage } = {}) {
   if (!usage) return;
   const input = Number(usage.input_tokens) || 0;
+  const cache = Number(usage.cache_read_input_tokens) || 0;
   const output = Number(usage.output_tokens) || 0;
   if (!input && !output) return;
   const entry = day();
   entry.tokensIn += input;
+  entry.cacheIn += cache;
   entry.tokensOut += output;
   if (model) {
     entry.models[model] = entry.models[model] || { requests: 0, tokensIn: 0, tokensOut: 0 };
     entry.models[model].tokensIn += input;
+        entry.models[model].cacheIn = (entry.models[model].cacheIn || 0) + cache;
     entry.models[model].tokensOut += output;
   }
   if (account) {
     entry.accounts[account] = entry.accounts[account] || { requests: 0, tokensIn: 0, tokensOut: 0 };
     entry.accounts[account].tokensIn += input;
+        entry.accounts[account].cacheIn = (entry.accounts[account].cacheIn || 0) + cache;
     entry.accounts[account].tokensOut += output;
   }
   dirty = true;
@@ -87,17 +91,20 @@ function sumDays(keys) {
     total.errors += entry.errors;
     total.tokensIn += entry.tokensIn;
     total.tokensOut += entry.tokensOut;
+    total.cacheIn += entry.cacheIn || 0;
     for (const [model, stats] of Object.entries(entry.models || {})) {
       total.models[model] = total.models[model] || { requests: 0, tokensIn: 0, tokensOut: 0 };
       total.models[model].requests += stats.requests;
       total.models[model].tokensIn += stats.tokensIn;
       total.models[model].tokensOut += stats.tokensOut;
+      total.models[model].cacheIn = (total.models[model].cacheIn || 0) + (stats.cacheIn || 0);
     }
     for (const [account, stats] of Object.entries(entry.accounts || {})) {
       total.accounts[account] = total.accounts[account] || { requests: 0, tokensIn: 0, tokensOut: 0 };
       total.accounts[account].requests += stats.requests;
       total.accounts[account].tokensIn += stats.tokensIn;
       total.accounts[account].tokensOut += stats.tokensOut;
+      total.accounts[account].cacheIn = (total.accounts[account].cacheIn || 0) + (stats.cacheIn || 0);
     }
   }
   return total;
