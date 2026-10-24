@@ -159,14 +159,30 @@ async function upstreamRequest(body, options = {}) {
   return { response, credentials, sessionId, url, status, contentType };
 }
 
+// The gateway sometimes answers in Chinese; known messages are translated
+// so users always see English (e.g. the always-thinking error 1210).
+function translateUpstreamMessage(message) {
+  const text = String(message || '');
+  if (/\u8be5\u6a21\u578b\u59cb\u7ec8\u601d\u8003/.test(text)) {
+    return 'This model always thinks - reasoning cannot be disabled. Use thinking effort low, high, or max instead.';
+  }
+  if (/\u5957\u9910\u5df2\u7528\u5b8c/.test(text)) {
+    return 'Coding plan tokens are used up for this model.';
+  }
+  if (/\u4f59\u989d\u4e0d\u8db3/.test(text)) {
+    return 'Insufficient balance: the tokens for this request are used up.';
+  }
+  return text;
+}
+
 function extractUpstreamErrorMessage(parsed, text, status) {
   if (parsed) {
-    if (typeof parsed.message === 'string') return parsed.message;
-    if (parsed.error && typeof parsed.error.message === 'string') return parsed.error.message;
-    if (typeof parsed.msg === 'string') return parsed.msg;
+    if (typeof parsed.message === 'string') return translateUpstreamMessage(parsed.message);
+    if (parsed.error && typeof parsed.error.message === 'string') return translateUpstreamMessage(parsed.error.message);
+    if (typeof parsed.msg === 'string') return translateUpstreamMessage(parsed.msg);
     if (typeof parsed.code === 'number') return `ZCode upstream error ${parsed.code}`;
   }
-  if (text) return text.slice(0, 500);
+  if (text) return translateUpstreamMessage(text.slice(0, 500));
   return `ZCode upstream returned HTTP ${status || 'error'}`;
 }
 
@@ -187,7 +203,7 @@ function isPlanError(parsed, text) {
     const nested = parsed.error || {};
     if (nested.code === 3101 || nested.type === 'billing' || nested.type === 'insufficient_quota') return true;
   }
-  return /coding plan|plan.{0,30}(required|expire|exhaust)|(quota|balance).{0,30}(exhaust|exceed|insufficient)|insufficient.{0,30}(quota|balance)|套餐|余额不足/i.test(text || '');
+  return /coding plan|plan.{0,30}(required|expire|exhaust)|(quota|balance).{0,30}(exhaust|exceed|insufficient)|insufficient.{0,30}(quota|balance)|\u5957\u9910|\u4f59\u989d\u4e0d\u8db3/i.test(text || '');
 }
 
 function shouldRetry(error, attempt) {
@@ -363,6 +379,7 @@ async function upstreamRequestWithRetry(body, options = {}) {
 }
 
 module.exports = {
+  extractUpstreamErrorMessage,
   platformHeaders,
   upstreamUrl,
   buildUpstreamHeaders,
