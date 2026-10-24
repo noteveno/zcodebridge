@@ -9,6 +9,7 @@ const { HttpError, firstDefined } = require('./util');
 const { mapModel, splitEffortSuffix, normalizeEffort } = require('./models');
 const { clampMaxTokens } = require('./upstream');
 const { iterateSse, sseWrite } = require('./sse');
+const stats = require('./stats');
 
 function contentToText(content) {
   if (typeof content === 'string') return content;
@@ -526,7 +527,10 @@ async function streamAnthropicToOpenAI(response, res, requestedModel, options = 
         if (data.delta && data.delta.stop_reason) {
           finishReason = anthropicStopReasonToOpenAI(data.delta.stop_reason);
         }
-        if (data.usage) usage = usageToOpenAI(data.usage);
+        if (data.usage) {
+          usage = usageToOpenAI(data.usage);
+          if (options.statsCtx) stats.noteUsage({ ...options.statsCtx, usage: data.usage });
+        }
         continue;
       }
 

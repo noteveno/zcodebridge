@@ -10,6 +10,7 @@ const { HttpError } = require('./util');
 const { mapModel, splitEffortSuffix, normalizeEffort } = require('./models');
 const { clampMaxTokens } = require('./upstream');
 const { iterateSse, sseWrite } = require('./sse');
+const stats = require('./stats');
 const {
   contentToText,
   openAIContentToAnthropic,
@@ -241,7 +242,7 @@ function anthropicToResponses(json, requestedModel, options = {}) {
 }
 
 // Streams Anthropic SSE translated into Responses API SSE events.
-async function streamAnthropicToResponses(response, res, requestedModel) {
+async function streamAnthropicToResponses(response, res, requestedModel, statsCtx) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -417,7 +418,10 @@ async function streamAnthropicToResponses(response, res, requestedModel) {
       }
 
       if (type === 'message_delta') {
-        if (data.usage) usage = usageToResponses(data.usage);
+        if (data.usage) {
+          usage = usageToResponses(data.usage);
+          if (statsCtx) stats.noteUsage({ ...statsCtx, usage: data.usage });
+        }
         continue;
       }
 

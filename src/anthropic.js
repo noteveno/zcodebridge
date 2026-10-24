@@ -4,6 +4,7 @@
 // untouched (only the model name is rewritten to the requested alias).
 
 const { iterateSse } = require('./sse');
+const stats = require('./stats');
 
 function rewriteAnthropicJson(json, requestedModel) {
   if (json && typeof json === 'object' && requestedModel) {
@@ -12,7 +13,7 @@ function rewriteAnthropicJson(json, requestedModel) {
   return json;
 }
 
-async function streamAnthropicPassthrough(response, res, requestedModel) {
+async function streamAnthropicPassthrough(response, res, requestedModel, statsCtx) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -28,6 +29,7 @@ async function streamAnthropicPassthrough(response, res, requestedModel) {
       if (data) {
         try {
           const parsed = JSON.parse(data);
+          if (statsCtx && parsed.type === 'message_delta' && parsed.usage) stats.noteUsage({ ...statsCtx, usage: parsed.usage });
           if (parsed && typeof parsed === 'object' && requestedModel && typeof parsed.model === 'string') {
             parsed.model = requestedModel;
           }

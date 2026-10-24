@@ -7,7 +7,7 @@ const path = require('node:path');
 const { readJsonIfExists, firstDefined } = require('./util');
 
 const ROOT = path.join(__dirname, '..');
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const APP_VERSION = '3.16.3';
 
 function loadConfig() {

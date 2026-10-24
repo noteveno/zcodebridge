@@ -5,6 +5,7 @@
 
 const crypto = require('node:crypto');
 const { config, log, APP_VERSION } = require('./config');
+const stats = require('./stats');
 const { HttpError, sleep, makeSessionId, readResponseText } = require('./util');
 const { systemBlocks } = require('./prompts');
 const { loadAccountCredentials, accountNames, pickAccount, pickFrom } = require('./credentials');
@@ -150,9 +151,11 @@ async function upstreamRequest(body, options = {}) {
     error.isWafBlock = status === 405 || (parsed && parsed.code === 3012);
     error.isPlanError = isPlanError(parsed, text);
     error.isRetryable = status === 502 || status === 503 || status === 504 || status === 429;
+    stats.noteRequest({ account, model: body.model || '', stream, error: true });
     throw error;
   }
 
+  stats.noteRequest({ account, model: body.model || '', stream });
   return { response, credentials, sessionId, url, status, contentType };
 }
 

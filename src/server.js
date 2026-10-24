@@ -8,6 +8,7 @@ const { HttpError, makeSessionId, readResponseText } = require('./util');
 const { accountNames, loadAccountCredentials } = require('./credentials');
 const { upstreamUrl, upstreamRequestWithRetry, clampMaxTokens } = require('./upstream');
 const { fetchAccountUsage, cachedAccountUsage, capabilityModels } = require('./billing');
+const stats = require('./stats');
 const { modelList, mapModel, mergeDiscoveredModels, knownModels, splitEffortSuffix, normalizeEffort } = require('./models');
 const { openAIToAnthropic, anthropicToOpenAIResponse, streamAnthropicToOpenAI } = require('./openai');
 const { rewriteAnthropicJson, streamAnthropicPassthrough } = require('./anthropic');
@@ -217,6 +218,7 @@ async function requestUpstreamJson(anthropicBody, req, upstreamOptions = {}) {
   } catch {
     throw new HttpError(502, 'ZCode upstream returned invalid JSON', 'upstream_invalid_json', 'api_error');
   }
+  stats.noteUsage({ account: upstream.credentials.name, model: anthropicBody.model, usage: json.usage });
   return { upstream, json };
 }
 
@@ -263,7 +265,8 @@ async function handleOpenAIChat(req, res) {
 
   if (body.stream === true) {
     const upstream = await upstreamRequestWithRetry(anthropicBody, upstreamOptions);
-    await streamAnthropicToOpenAI(upstream.response, res, requestedModel, { jsonMode });
+    const statsCtx = { account: upstream.credentials.name, model: anthropicBody.model };
+    await streamAnthropicToOpenAI(upstream.response, res, requestedModel, { jsonMode, statsCtx });
     return;
   }
 
@@ -313,7 +316,7 @@ async function handleAnthropicMessages(req, res) {
 
   if (body.stream === true) {
     const upstream = await upstreamRequestWithRetry(anthropicBody, upstreamOptions);
-    await streamAnthropicPassthrough(upstream.response, res, requestedModel);
+    await streamAnthropicPassthrough(upstream.response, res, requestedModel, { account: upstream.credentials.name, model: anthropicBody.model });
     return;
   }
 
@@ -349,7 +352,7 @@ async function handleResponses(req, res) {
 
   if (body.stream === true) {
     const upstream = await upstreamRequestWithRetry(anthropicBody, upstreamOptions);
-    await streamAnthropicToResponses(upstream.response, res, requestedModel);
+    await streamAnthropicToResponses(upstream.response, res, requestedModel, { account: upstream.credentials.name, model: anthropicBody.model });
     return;
   }
 
@@ -408,6 +411,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && (pathname === '/v1/stats' || pathname === '/stats')) {
+      stats.flush();
+      sendJson(res, 200, { object: 'stats', generated_at: new Date().toISOString(), ...stats.summary() });
+      return;
+    }
+
     if (req.method === 'POST' && (pathname === '/v1/chat/completions' || pathname === '/chat/completions')) {
       await handleOpenAIChat(req, res);
       return;
@@ -455,6 +464,43 @@ server.on('clientError', (error, socket) => {
   }
 });
 
+// --- startup banner --------------------------------------------------------
+
+const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+const paint = (code, text) => (useColor ? `\x1b[${code}m${text}\x1b[0m` : text);
+const b = (t) => paint('1', t);
+const d = (t) => paint('2', t);
+const c = (t) => paint('36', t);
+const g = (t) => paint('32', t);
+
+function fmtTokens(value) {
+  const n = Number(value) || 0;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(n);
+}
+
+function printBanner() {
+  const names = accountNames().map((n) => n || '(default)');
+  const s = stats.summary();
+  const line = d('─'.repeat(66));
+  console.log('');
+  console.log(`  ${line}`);
+  console.log(`    ${b('ZCodeBridge')} ${d(`v${VERSION}`)}   ${d('· ZCode plan → OpenAI · Anthropic · Responses')}`);
+  console.log(`  ${line}`);
+  console.log(`    ${c('proxy')}       http://${config.host}:${config.port}`);
+  console.log(`    ${c('endpoints')}  /v1/chat/completions · /v1/messages · /v1/responses`);
+  console.log(`               /v1/models · /v1/usage · /v1/stats · /health`);
+  console.log(`    ${c('models')}     ${[...new Set([config.defaultModel, config.flashModel])].join(' · ')}`);
+  console.log(`    ${c('accounts')}   ${names.length ? g(names.join(' · ')) : paint('33', 'none yet - run: node auth')}`);
+  console.log('');
+  console.log(`    ${c('today')}      ${s.today.requests} requests · ${fmtTokens(s.today.tokensIn)} in · ${fmtTokens(s.today.tokensOut)} out`);
+  console.log(`    ${c('last 7d')}    ${s.week.requests} requests · ${fmtTokens(s.week.tokensIn)} in · ${fmtTokens(s.week.tokensOut)} out`);
+  console.log(`  ${line}`);
+  console.log('');
+}
+
 function start() {
   const credentials = (() => {
     try {
@@ -468,14 +514,9 @@ function start() {
   })();
 
   server.listen(config.port, config.host, () => {
-    log('info', `zcodebridge ${VERSION} listening on http://${config.host}:${config.port}`);
-    log('info', `upstream: ${upstreamUrl()}`);
-    log('info', `models: ${config.defaultModel}, ${config.flashModel}`);
-    log('info', `accounts: ${accountNames().map((n) => n || '(default)').join(', ')}`);
-    if (credentials) {
-      log('info', `ZCode account: ${credentials.userInfo.email || credentials.accountUuid || 'unknown'}`);
-    } else {
-      log('warn', 'No ZCode credentials loaded yet. Sign in with ZCode, then requests will pick them up automatically.');
+    printBanner();
+    if (!credentials) {
+      log('warn', 'No account credentials loaded yet. Add one with: node auth');
     }
     if (config.apiKey) log('info', 'Proxy API key is enabled.');
   });
@@ -483,10 +524,12 @@ function start() {
 
 process.on('SIGINT', () => {
   log('info', 'shutting down');
+  stats.flush();
   server.close(() => process.exit(0));
 });
 process.on('SIGTERM', () => {
   log('info', 'shutting down');
+  stats.flush();
   server.close(() => process.exit(0));
 });
 

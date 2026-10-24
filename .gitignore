@@ -12,3 +12,4 @@ models.json
 # not part of the project
 archive/
 node_modules/
+stats.json

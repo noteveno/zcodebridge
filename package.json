@@ -1,6 +1,6 @@
 {
   "name": "zcodebridge",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Use your ZCode / Z.ai plan through OpenAI-, Anthropic- and Responses-compatible APIs - works with Claude Code, Codex, OpenCode and any SDK. Zero dependencies.",
   "main": "server.js",
   "scripts": {
@@ -9,7 +9,9 @@
     "backup": "node backup.js",
     "watch": "node models.js watch",
     "accounts": "node accounts.js",
-    "test": "node tests/test_regression.mjs"
+    "test": "node tests/test_regression.mjs",
+    "auth": "node auth.js",
+    "stats": "node stats.js"
   },
   "engines": {
     "node": ">=18"

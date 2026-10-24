@@ -161,35 +161,31 @@ async function cmdLogin(name) {
     state,
   }).toString();
 
-  console.log(name
-    ? `Z.ai login for account "${name}"`
-    : 'Z.ai login (the account will be named after the signed-in email automatically)');
-  console.log('\n1. Open this link in your browser and sign in (or sign up) with the account');
-  console.log('   you want to add:');
-  console.log('\n   ' + authorizeUrl + '\n');
-  console.log('2. After signing in, the page may ask to open the ZCode app or show an');
-  console.log('   "Authorization Failed" screen. In every case: copy the link from the');
-  console.log('   browser ADDRESS BAR (it contains code=...).');
-  console.log('   Do not click that button - it would open the ZCode desktop app.');
-  console.log('\n3. Paste the copied link here and press Enter.');
-  console.log('   (This also works from a browser on another device/network.)');
-  console.log('\nWaiting for the callback link... (timeout 10 minutes, Ctrl+C to cancel)');
+  console.log(`\n  ${ui.rule('─'.repeat(66))}`);
+  console.log(`    ${ui.bold('ZCodeBridge')} ${ui.dim('·')} ${ui.cyan('add account')} ${ui.dim(name ? `· "${name}"` : '· auto-named from your email')}`);
+  console.log(`  ${ui.rule('─'.repeat(66))}\n`);
+  console.log(`  ${ui.green('1')}  ${ui.bold('Open the sign-in link')} ${ui.dim('(any browser, any device)')}\n`);
+  console.log(`     ${ui.cyan(authorizeUrl)}\n`);
+  console.log(`  ${ui.green('2')}  ${ui.bold('Sign in')} with the Z.ai account to add ${ui.dim('(sign-up works too)')}\n`);
+  console.log(`  ${ui.green('3')}  ${ui.bold('Copy the link from the browser address bar')} ${ui.dim('(it contains code=...)')}`);
+  console.log(`     ${ui.dim('The page may say "Authorization Failed" or ask to open the ZCode')}`);
+  console.log(`     ${ui.dim('app - that is fine. Do NOT click any "open app" button.')}\n`);
+  console.log(`  ${ui.green('›')}  ${ui.bold('Paste the link below and press Enter')} ${ui.dim('(timeout 10 min, Ctrl+C to cancel)')}\n`);
 
   let callback;
   try {
     callback = await waitForCallbackPaste(10 * 60 * 1000);
   } catch (error) {
-    console.error('Login failed: ' + error.message);
+    console.error(`\n  ${ui.red('✗ login failed:')} ${error.message}`);
     process.exitCode = 1;
     return;
   }
   if (callback.state && callback.state !== state) {
-    console.error('State mismatch - the login reply is not for this session. Try again.');
+    console.error(`\n  ${ui.red('✗ state mismatch')} - the pasted link belongs to another session. Try again.`);
     process.exitCode = 1;
     return;
   }
-
-  console.log('Exchanging authorization code...');
+  console.log(`\n  ${ui.green('✓')} code received ${ui.dim('- exchanging tokens...')}`);
   let tokenJson;
   try {
     const res = await fetch(OAUTH.tokenUrl, {
@@ -211,7 +207,7 @@ async function cmdLogin(name) {
   const jwt = tokenJson.data.token;
   const zaiAccessToken = tokenJson.data.zai?.access_token || '';
 
-  console.log('Resolving business token...');
+  console.log(`  ${ui.green('✓')} tokens exchanged ${ui.dim('- resolving account...')}`);
   let accessToken = zaiAccessToken;
   try {
     const res = await fetch(OAUTH.businessLoginUrl, {
@@ -222,7 +218,7 @@ async function cmdLogin(name) {
     const json = await res.json();
     accessToken = json.data?.access_token?.trim() || json.data?.accessToken?.trim() || zaiAccessToken;
   } catch (error) {
-    console.warn('Business token exchange failed (' + error.message + '); using the raw OAuth token.');
+    console.warn(`  ${ui.yellow('!')} business token fallback (${error.message})`);
   }
 
   let userInfo = tokenJson.data.user && typeof tokenJson.data.user === 'object' ? tokenJson.data.user : null;
@@ -243,7 +239,6 @@ async function cmdLogin(name) {
 
   if (!name) {
     name = deriveAccountName(normalizedUser.email, normalizedUser.user_id);
-    console.log(`\nAccount name: ${name}`);
   }
   const destDir = path.join(accountsRoot(), name);
 
@@ -256,13 +251,16 @@ async function cmdLogin(name) {
     zcodejwttoken: jwt,
   }, null, 2));
   fs.writeFileSync(path.join(destDir, 'telemetry-state.json'), JSON.stringify({ deviceMid }, null, 2));
-  console.log(`\nAccount "${name}" saved (${normalizedUser.email || normalizedUser.user_id || 'unknown user'}).`);
+
+  console.log(`\n  ${ui.rule('─'.repeat(66))}`);
+  console.log(`    ${ui.green('✓ account saved')}   ${ui.bold(name)} ${ui.dim(`· ${normalizedUser.email || normalizedUser.user_id || 'unknown user'}`)}`);
+  console.log(`  ${ui.rule('─'.repeat(66))}`);
 
   // Same "claim free plan" button the desktop app shows after signup.
   const credentials = { name, jwt, deviceMid, userInfo: normalizedUser };
   await claimAvailablePlans(credentials);
   await printAccountUsage(credentials);
-  console.log('\nDone. The proxy picks the account up on the next request - no restart needed.');
+  console.log(`\n  ${ui.dim('Ready - the proxy picks the account up on the very next request.')}\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -468,7 +466,8 @@ function formatExpiry(ms) {
 
 function cmdAdd(name, credFile, telemetryFile) {
   if (!name || !/^[A-Za-z0-9._-]+$/.test(name)) {
-    console.error(`Invalid account name "${name}". Use letters, digits, . _ - only.`);
+    console.error(`\n  ${ui.yellow('usage:')} node add <name> [credentials.json [telemetry-state.json]]`);
+    console.error(`  ${ui.dim('Captures the login currently active in the ZCode desktop app.')}\n`);
     process.exitCode = 1;
     return;
   }
@@ -563,31 +562,39 @@ function cmdRemove(name) {
 
 // ---------------------------------------------------------------------------
 
-const [command, ...args] = process.argv.slice(2);
-switch (command) {
-  case 'login':
-    cmdLogin(args[0]);
-    break;
-  case 'add':
-    cmdAdd(args[0], args[1], args[2]);
-    break;
-  case 'usage':
-    cmdUsage();
-    break;
-  case 'claim':
-    cmdClaim(args[0]);
-    break;
-  case 'list':
-    cmdList();
-    break;
-  case 'remove':
-  case 'rm':
-    cmdRemove(args[0]);
-    break;
-  case 'path':
-    console.log(accountsRoot());
-    break;
-  default:
-    usage();
-    if (command && command !== 'help' && command !== '--help') process.exitCode = 1;
+function run(command, args = []) {
+  switch (command) {
+    case 'login':
+      cmdLogin(args[0]);
+      break;
+    case 'add':
+      cmdAdd(args[0], args[1], args[2]);
+      break;
+    case 'usage':
+      cmdUsage();
+      break;
+    case 'claim':
+      cmdClaim(args[0]);
+      break;
+    case 'list':
+      cmdList();
+      break;
+    case 'remove':
+    case 'rm':
+      cmdRemove(args[0]);
+      break;
+    case 'path':
+      console.log(accountsRoot());
+      break;
+    default:
+      usage();
+      if (command && command !== 'help' && command !== '--help') process.exitCode = 1;
+  }
+}
+
+// Standalone wrappers (node auth, node usage, node list, ...) call these.
+module.exports = { run, cmdLogin, cmdAdd, cmdUsage, cmdClaim, cmdList, cmdRemove, usage };
+
+if (require.main === module) {
+  run(process.argv[2], process.argv.slice(3));
 }

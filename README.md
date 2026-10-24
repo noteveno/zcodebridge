@@ -32,16 +32,24 @@ node accounts login
 
 (To run as a service on Linux, see `deploy/zcodebridge.service`.)
 
-## Adding accounts
+## Commands
 
 ```bash
-node accounts login            # name is derived from the account email automatically
-node accounts login work       # ...or give it an explicit name
-node accounts add <name>       # or capture the login from the ZCode desktop app
-node accounts list             # all accounts
-node accounts usage            # live tokens used/left + expiry per account
-node accounts remove <name>
+node server           # start the proxy (beautiful banner, live stats)
+node auth             # add a Z.ai account (interactive OAuth, auto-named)
+node usage            # live plan usage: token bars, expiry countdowns
+node stats            # proxy requests + tokens per day / week / all time
+node list             # all configured accounts
+node claim [name]     # claim any free plan Z.ai offers
+node add <name>       # capture the login from the ZCode desktop app
+node remove <name>    # delete a stored account
+node setup            # (re)configure Claude Code / Codex / OpenCode
+node backup           # admin backup zip (includes secrets)
 ```
+
+(`node accounts <cmd>` works too, and every command outputs the same styled UI - colors auto-disable when piped. `npm start` / `npm run auth` / etc. also work.)
+
+## Adding accounts
 
 `login` prints a link you open in any browser yourself (nothing auto-opens — the browser can be on any device or network). After you sign in:
 
@@ -67,6 +75,8 @@ With several accounts:
 ```bash
 curl http://127.0.0.1:8787/v1/usage
 ```
+
+Also available: `curl /v1/stats` (or `node stats`) - requests and tokens per day, week, and all time, per model and per account.
 
 Shows per account: active plans, expiry, per-model buckets (total / used / remaining / reset time), and a `plan_status` field (`active`, or "one-time plan tokens finished; using daily tokens …"). Add `x-refresh-usage: 1` to bypass the 30-second cache. `node accounts usage` prints a friendly version.
 
